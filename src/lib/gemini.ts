@@ -20,6 +20,8 @@ export const generateNews = async (
     timeZone: 'America/Los_Angeles'
   });
 
+  let rankedNews: RankedNewsItem[] = [];
+
   try {
     // 1. Step: Collect and Rank news via our server-side collector
     const collectionResponse = await fetch("/api/collect-news");
@@ -27,6 +29,7 @@ export const generateNews = async (
       throw new Error("Failed to collect news from RSS");
     }
     const { news }: { news: RankedNewsItem[] } = await collectionResponse.json();
+    rankedNews = news;
 
     // 2. Step: Verification / Fallback with Google Search if news count is too low
     let finalNews = news;
@@ -43,8 +46,6 @@ export const generateNews = async (
         model: "gemini-3-flash-preview",
         contents: prompt,
         config: {
-          // If we need search because of low item count, we enable it here
-          // But our instruction to Gemini is to mostly use provided context
           tools: needsSearch ? [{ googleSearch: {} }] : undefined,
         }
       });
@@ -66,6 +67,24 @@ export const generateNews = async (
     }
   } catch (error) {
     console.error("News Generation Workflow Error:", error);
+    
+    // FALLBACK MODE
+    if (rankedNews.length > 0) {
+      const topItems = rankedNews.slice(0, 5);
+      let fallbackReport = `### ⚠️ AI Analysis Unavailable (Fallback Mode)\n\n*The news report was generated using raw RSS signals due to an LLM service interruption.*\n\n---\n\n`;
+      
+      topItems.forEach((item, i) => {
+        fallbackReport += `### ${i + 1}. ${item.title}\n`;
+        fallbackReport += `- **Source**: ${item.source} (${item.category})\n`;
+        fallbackReport += `- **Confidence**: [${item.confidence}]\n`;
+        if (item.publishedAt) fallbackReport += `- **Published**: ${new Date(item.publishedAt).toLocaleTimeString()}\n`;
+        fallbackReport += `- **Quick Look**: ${(item.contentSnippet || "No snippet available").slice(0, 150)}...\n`;
+        fallbackReport += `- **[Source Link](${item.link})**\n\n`;
+      });
+      
+      return fallbackReport;
+    }
+    
     throw error;
   }
 };
@@ -89,6 +108,8 @@ export const generateMarketIntelligence = async (
     timeZone: 'America/Los_Angeles'
   });
 
+  let marketSnapshot: any[] = [];
+
   try {
     // 1. Fetch real market data from our API
     const marketResponse = await fetch("/api/market-data");
@@ -96,6 +117,7 @@ export const generateMarketIntelligence = async (
       throw new Error("Failed to fetch market data");
     }
     const { snapshot } = await marketResponse.json();
+    marketSnapshot = snapshot;
 
     // 2. Prepare the market data for the prompt
     const marketStatusSummary = snapshot.some((s: any) => s.marketStatus === 'open') ? 'Open' : 'Closed';
@@ -171,7 +193,7 @@ ${JSON.stringify(snapshot.map((s: any) => ({
 - (分析市场当前是在提前定价什么风险或机会？语气需专业、冷静，类似 Bloomberg Brief 工作简报。)
 
 ## 6. 🎓 标的/概念科普 (Glossary)
-- (针对本次报告出现的 3-5 个核心标的或名词，提供准确、实用的科普。)
+- (针对本次报告出现的 3-5 个核心标二或名词，提供准确、实用的科普。)
 
 *Disclaimer: This is informational market analysis, not financial advice.*
 `;
@@ -188,11 +210,40 @@ ${JSON.stringify(snapshot.map((s: any) => ({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ type: 'market', prompt: marketPrompt }),
       });
+      
+      if (!response.ok) {
+        throw new Error("LLM failure");
+      }
+
       const data = await response.json();
       return data.content || "Failed to generate market intelligence.";
     }
   } catch (error) {
     console.error("Market Intelligence Error:", error);
+    
+    // FALLBACK MODE
+    if (marketSnapshot.length > 0) {
+      let fallbackReport = `### ⚠️ AI Analysis Unavailable (Fallback Mode)\n\n*Showing latest market data. AI insight unavailable at this time.*\n\n---\n\n`;
+      
+      const sorted = [...marketSnapshot].sort((a, b) => (b.changePercent || 0) - (a.changePercent || 0));
+      const winners = sorted.slice(0, 3);
+      const losers = sorted.slice(-3).reverse();
+
+      fallbackReport += `### 📈 Top Gainers\n`;
+      winners.forEach(s => {
+        fallbackReport += `- **${s.name}**: ${s.price || 'N/A'} (${(s.changePercent || 0) > 0 ? '+' : ''}${s.changePercent?.toFixed(2)}%)\n`;
+      });
+
+      fallbackReport += `\n### 📉 Top Decliners\n`;
+      losers.forEach(s => {
+        fallbackReport += `- **${s.name}**: ${s.price || 'N/A'} (${(s.changePercent || 0) > 0 ? '+' : ''}${s.changePercent?.toFixed(2)}%)\n`;
+      });
+
+      fallbackReport += `\n---\n\n*Note: Ticker data is sourced directly from Finnhub API. Numerical discrepancies may occur during high volatility.*`;
+      
+      return fallbackReport;
+    }
+    
     throw error;
   }
 };

@@ -1,7 +1,7 @@
 import RSSParser from "rss-parser";
 import { formatInTimeZone } from "date-fns-tz";
 import { subHours, isWithinInterval } from "date-fns";
-import { RawNewsItem, RankedNewsItem, SourceCategory } from "../types";
+import { RawNewsItem, RankedNewsItem, SourceCategory, RSSHealthStats, Confidence } from "../types";
 import { GoogleGenAI } from "@google/genai";
 
 const parser = new RSSParser();
@@ -109,7 +109,7 @@ export const RSS_FEEDS: { source: string; url: string; weight: number; category:
   // Community Signal
   {
     source: "Hacker News",
-    url: "https://hnrss.org/frontpage",
+    url: "https://news.ycombinator.com/rss",
     weight: 6,
     category: "Community Signal",
   },
@@ -164,12 +164,15 @@ const PRIORITY_KEYWORDS = {
   bigTech: ["google", "microsoft", "apple", "meta", "amazon", "tesla", "nvidia", "netflix"],
 };
 
-export async function collectNewsFromRSS(): Promise<RawNewsItem[]> {
+export async function collectNewsFromRSS(): Promise<{ items: RawNewsItem[]; stats: RSSHealthStats }> {
   const allItems: RawNewsItem[] = [];
+  const failures: { source: string; error: string }[] = [];
+  let successCount = 0;
 
   for (const feed of RSS_FEEDS) {
     try {
       const response = await parser.parseURL(feed.url);
+      successCount++;
       for (const item of response.items) {
         allItems.push({
           title: item.title || "Untitled",
@@ -177,16 +180,25 @@ export async function collectNewsFromRSS(): Promise<RawNewsItem[]> {
           source: feed.source,
           category: feed.category,
           publishedAt: item.isoDate || item.pubDate,
-          contentSnippet: item.contentSnippet || item.content,
+          contentSnippet: (item.contentSnippet || item.content || "").replace(/<[^>]*>?/gm, ''), // Basic HTML stripping
           sourceWeight: feed.weight,
         });
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error(`Failed to fetch RSS from ${feed.source}:`, error);
+      failures.push({ source: feed.source, error: error.message || "Unknown error" });
     }
   }
 
-  return allItems;
+  const stats: RSSHealthStats = {
+    lastRefresh: formatInTimeZone(new Date(), LA_TZ, "HH:mm"),
+    totalSources: RSS_FEEDS.length,
+    successCount,
+    failedCount: failures.length,
+    failures,
+  };
+
+  return { items: allItems, stats };
 }
 
 export function filterRecentNews(items: RawNewsItem[], hours = 24): RawNewsItem[] {
@@ -215,22 +227,39 @@ function normalizeTitle(title: string): string {
 }
 
 export function dedupeNews(items: RawNewsItem[]): RawNewsItem[] {
-  const seenTitles = new Set<string>();
   const deduped: RawNewsItem[] = [];
 
   for (const item of items) {
-    const normalized = normalizeTitle(item.title);
+    const normA = normalizeTitle(item.title);
+    const wordsA = new Set(normA.split(" "));
+
     let isDuplicate = false;
-    for (const seen of seenTitles) {
-      if (seen.includes(normalized) || normalized.includes(seen)) {
+    for (const seenItem of deduped) {
+      const normB = normalizeTitle(seenItem.title);
+      const wordsB = normB.split(" ");
+      
+      // 1. Normalized title inclusion
+      if (normA.includes(normB) || normB.includes(normA)) {
         isDuplicate = true;
         break;
+      }
+
+      // 2. Keyword overlap (if 60% of words overlap)
+      const overlap = wordsB.filter(w => wordsA.has(w)).length;
+      const ratio = overlap / Math.max(wordsA.size, wordsB.length);
+      if (ratio > 0.6) {
+        // Only if publish time is within 6 hours
+        const timeA = item.publishedAt ? new Date(item.publishedAt).getTime() : 0;
+        const timeB = seenItem.publishedAt ? new Date(seenItem.publishedAt).getTime() : 0;
+        if (Math.abs(timeA - timeB) < 6 * 60 * 60 * 1000) {
+          isDuplicate = true;
+          break;
+        }
       }
     }
 
     if (!isDuplicate) {
       deduped.push(item);
-      seenTitles.add(normalized);
     }
   }
 
@@ -239,15 +268,19 @@ export function dedupeNews(items: RawNewsItem[]): RawNewsItem[] {
 
 export function rankNews(items: RawNewsItem[]): RankedNewsItem[] {
   // Pre-process for multi-source confirmation
-  const normalizedMap = new Map<string, number>();
+  const normalizedMap = new Map<string, { count: number; maxWeight: number }>();
   items.forEach(item => {
-    const norm = normalizeTitle(item.title).slice(0, 50); // Use prefix for better matching
-    normalizedMap.set(norm, (normalizedMap.get(norm) || 0) + 1);
+    const norm = normalizeTitle(item.title).slice(0, 60); 
+    const current = normalizedMap.get(norm) || { count: 0, maxWeight: 0 };
+    normalizedMap.set(norm, { 
+      count: current.count + 1, 
+      maxWeight: Math.max(current.maxWeight, item.sourceWeight) 
+    });
   });
 
   const ranked: RankedNewsItem[] = items.map((item) => {
-    const norm = normalizeTitle(item.title).slice(0, 50);
-    const confirmationCount = normalizedMap.get(norm) || 1;
+    const norm = normalizeTitle(item.title).slice(0, 60);
+    const { count: confirmationCount, maxWeight } = normalizedMap.get(norm) || { count: 1, maxWeight: item.sourceWeight };
     
     let score = item.sourceWeight;
     const matchedKeywords: string[] = [];
@@ -262,7 +295,6 @@ export function rankNews(items: RawNewsItem[]): RankedNewsItem[] {
         if (fullText.includes(kw)) {
           matchedKeywords.push(kw);
           categoryMatch = true;
-          // Title matches weigh more
           score += lowerTitle.includes(kw) ? 4 : 2;
         }
       }
@@ -282,12 +314,11 @@ export function rankNews(items: RawNewsItem[]): RankedNewsItem[] {
     // Source Category Weighting
     if (item.category === "Hard News") score += 5;
     if (item.category === "Community Signal") {
-      // HN only scores big if it's very relevant to tech/ai
       const isHighSignalHN = /ai|openai|nvidia|apple|google|meta|microsoft|proton|security|linux|kernel/i.test(item.title);
       score += isHighSignalHN ? 4 : -5;
     }
 
-    // Recency boost (finer grained)
+    // Recency boost
     if (item.publishedAt) {
       const hoursAgo = (Date.now() - new Date(item.publishedAt).getTime()) / (1000 * 60 * 60);
       if (hoursAgo < 3) score += 10;
@@ -295,10 +326,21 @@ export function rankNews(items: RawNewsItem[]): RankedNewsItem[] {
       else if (hoursAgo < 16) score += 3;
     }
 
+    // Deterministic Confidence Engine
+    let confidence: Confidence = 'LOW';
+    if (confirmationCount >= 2 && maxWeight >= 9) {
+      confidence = 'HIGH';
+    } else if (item.sourceWeight >= 8 || confirmationCount >= 2) {
+      confidence = 'MEDIUM';
+    } else if (item.category === "Community Signal") {
+      confidence = 'LOW';
+    }
+
     return {
       ...item,
       score,
       confirmationCount,
+      confidence,
       matchedKeywords: Array.from(new Set(matchedKeywords)),
     };
   });

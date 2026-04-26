@@ -23,7 +23,7 @@ import { format } from 'date-fns';
 import { formatInTimeZone } from 'date-fns-tz';
 import { storage } from './lib/storage';
 import { generateNews, generateMarketIntelligence } from './lib/gemini';
-import { NewsReport, NewsHistory, MarketIntelligence, MarketTicker } from './types';
+import { NewsReport, NewsHistory, MarketIntelligence, MarketTicker, RSSHealthStats } from './types';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -40,6 +40,7 @@ export default function App() {
   const [view, setView] = useState<'reader' | 'history' | 'markets'>('reader');
   const [error, setError] = useState<string | null>(null);
   const [healthStatus, setHealthStatus] = useState<'loading' | 'ok' | 'error'>('loading');
+  const [rssStats, setRssStats] = useState<RSSHealthStats | null>(null);
   const [provider, setProvider] = useState<'gemini' | 'ollama'>('gemini');
 
   useEffect(() => {
@@ -62,6 +63,13 @@ export default function App() {
       const res = await fetch('/api/health');
       const data = await res.json();
       setHealthStatus(data.status === 'ok' ? 'ok' : 'error');
+
+      // Also fetch RSS stats
+      const rssRes = await fetch('/api/collect-news');
+      const rssData = await rssRes.json();
+      if (rssData.stats) {
+        setRssStats(rssData.stats);
+      }
     } catch (err) {
       setHealthStatus('error');
     }
@@ -435,6 +443,42 @@ ${recentMarkets || 'This is the first market scan for this period.'}
                     </div>
                   )}
                 </div>
+
+                {/* RSS Health Dashboard */}
+                {rssStats && (
+                  <div className="bg-white border border-black/5 p-6 rounded-[2rem] space-y-4">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-xs font-bold uppercase tracking-widest text-black/40">Feed Status</h3>
+                      <span className={cn(
+                        "text-[10px] font-bold px-2 py-0.5 rounded-full",
+                        rssStats.failedCount === 0 ? "bg-emerald-50 text-emerald-600" : "bg-amber-50 text-amber-600"
+                      )}>
+                        {rssStats.successCount} / {rssStats.totalSources} Healthy
+                      </span>
+                    </div>
+                    
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="p-3 bg-black/[0.02] rounded-2xl">
+                        <div className="text-[10px] uppercase font-bold tracking-widest text-black/20 mb-1">Refresh</div>
+                        <div className="text-sm font-serif font-bold">{rssStats.lastRefresh}</div>
+                      </div>
+                      <div className="p-3 bg-black/[0.02] rounded-2xl">
+                        <div className="text-[10px] uppercase font-bold tracking-widest text-black/20 mb-1">Failures</div>
+                        <div className="text-sm font-serif font-bold text-red-500">{rssStats.failedCount}</div>
+                      </div>
+                    </div>
+
+                    {rssStats.failures.length > 0 && (
+                      <div className="space-y-1 mt-2">
+                        {rssStats.failures.slice(0, 3).map((f, i) => (
+                          <div key={i} className="text-[10px] text-red-400 font-medium truncate">
+                             ⚠️ {f.source}: {f.error}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 <div className="space-y-4">
                   <h3 className="text-xs font-bold uppercase tracking-widest text-black/40">Archive by Date</h3>

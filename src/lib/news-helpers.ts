@@ -2,22 +2,19 @@ import { RawNewsItem, RankedNewsItem } from "../types";
 
 export function generateMorningPrompt(rankedItems: RankedNewsItem[], today: string, previousContext: string): string {
   const newsList = rankedItems.map((item, i) => 
-    `${i + 1}. [${item.source} | 类型: ${item.category || 'General'}] ${item.title}\n   Link: ${item.link}\n   Snippet: ${item.contentSnippet?.slice(0, 350)}...\n   多源确认数: ${item.confirmationCount}`
+    `${i + 1}. [${item.source} | 类型: ${item.category || 'General'}] ${item.title}\n   Link: ${item.link}\n   Snippet: ${item.contentSnippet?.slice(0, 350)}...\n   系统预设置信度: ${item.confidence}\n   多源确认数: ${item.confirmationCount}`
   ).join("\n\n");
 
   return `
 你是一名资深新闻总编（Editor-in-Chief），负责生成 America/Los_Angeles ${today} 的《科技与商业情报早报》。
 
-### 1. 严苛的置信度判定准则 (Mandatory)：
-只有满足以下任一条件，才允许标记为【置信度：高】：
-- 涉及官方声明、公司公告、政府或法院公开文件。
-- 来源于顶级权威媒体：Reuters, AP, BBC, Bloomberg, WSJ, FT, CNBC。
-- 列表中存在至少 2 个独立且可信的来源报道同一核心事实（参考“多源确认数”字段）。
+### 1. 置信度判定准则 (Mandatory)：
+我已经对候选新闻进行了初步的置信度分级（系统预设置信度），请以此为重要参考。
+你的目标是基于目前的证据（多源确认数、来源权重、内容性质）生成最终报告。
 
-其他判定限制：
-- 单一科技媒体来源 (TechCrunch, The Verge等) 默认最高评级为“中”。
-- Hacker News、社区讨论或匿名博客默认标记为“低”且标注为【未证实】。
-- 涉及裁员人数、并购金额、伤亡数字、法院裁决等敏感话题，若无多个权威源确认，必须强制降级。
+- **置信度：高 (HIGH)**: 必须涉及官方声明、顶级权威媒体（Reuters, AP, BBC, Bloomberg, WSJ, FT, CNBC）或多源验证。
+- **置信度：中 (MEDIUM)**: 来源于信誉良好的科技媒体（TechCrunch, The Verge等），但缺乏第二来源确认。
+- **置信度：低 (LOW)**: 来源于社区讨论（HN）、匿名博客或尚未证实的爆料。
 
 ### 2. 输出结构标准：
 - **确定事实 (Facts)**：仅限客观描述“发生的事实”。严禁包含动机推测、未来判断或夸张词汇。
@@ -57,7 +54,7 @@ ${newsList}
 
 export function generateEveningPrompt(rankedItems: RankedNewsItem[], today: string, previousContext: string): string {
   const newsList = rankedItems.map((item, i) => 
-    `${i + 1}. [${item.source} | 类型: ${item.category || 'General'}] ${item.title}\n   Link: ${item.link}\n   Snippet: ${item.contentSnippet?.slice(0, 350)}...\n   多源确认数: ${item.confirmationCount}`
+    `${i + 1}. [${item.source} | 类型: ${item.category || 'General'}] ${item.title}\n   Link: ${item.link}\n   Snippet: ${item.contentSnippet?.slice(0, 350)}...\n   系统预设置信度: ${item.confidence}\n   多源确认数: ${item.confirmationCount}`
   ).join("\n\n");
 
   return `

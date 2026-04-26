@@ -34,6 +34,8 @@ export type NewsHistory = NewsReport[];
 
 export type SourceCategory = 'Hard News' | 'Tech Media' | 'Community Signal' | 'Security / Specialist' | 'Business' | 'Policy' | 'General';
 
+export type Confidence = 'HIGH' | 'MEDIUM' | 'LOW';
+
 export type RawNewsItem = {
   title: string;
   link: string;
@@ -49,4 +51,13 @@ export type RankedNewsItem = RawNewsItem & {
   matchedKeywords: string[];
   recencyHours?: number;
   confirmationCount: number;
+  confidence: Confidence;
+};
+
+export type RSSHealthStats = {
+  lastRefresh: string;
+  totalSources: number;
+  successCount: number;
+  failedCount: number;
+  failures: { source: string; error: string }[];
 };

@@ -21,11 +21,11 @@ async function startServer() {
   // API Route for news collection from RSS
   app.get("/api/collect-news", async (req, res) => {
     try {
-      const raw = await collectNewsFromRSS();
-      const recent = filterRecentNews(raw);
+      const { items, stats } = await collectNewsFromRSS();
+      const recent = filterRecentNews(items);
       const deduped = dedupeNews(recent);
       const ranked = rankNews(deduped);
-      res.json({ news: ranked });
+      res.json({ news: ranked, stats });
     } catch (error: any) {
       console.error("RSS Collection Error:", error);
       res.status(500).json({ error: "Failed to collect news from RSS feeds." });
