@@ -4,6 +4,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import OpenAI from "openai";
 import dotenv from "dotenv";
+import { collectNewsFromRSS, filterRecentNews, dedupeNews, rankNews } from "./src/lib/news-workflow.ts";
 
 dotenv.config();
 
@@ -15,6 +16,20 @@ async function startServer() {
   const PORT = 3000;
 
   app.use(express.json());
+
+  // API Route for news collection from RSS
+  app.get("/api/collect-news", async (req, res) => {
+    try {
+      const raw = await collectNewsFromRSS();
+      const recent = filterRecentNews(raw);
+      const deduped = dedupeNews(recent);
+      const ranked = rankNews(deduped);
+      res.json({ news: ranked });
+    } catch (error: any) {
+      console.error("RSS Collection Error:", error);
+      res.status(500).json({ error: "Failed to collect news from RSS feeds." });
+    }
+  });
 
   // Ollama / LLM Client
   const openai = new OpenAI({

@@ -222,12 +222,24 @@ ${recentMarkets || 'This is the first market scan for this period.'}
   };
 
   const handleDelete = (id: string, e: React.MouseEvent) => {
+    e.preventDefault();
     e.stopPropagation();
+    
+    // Skip confirm for now to avoid issues in iframe environment
     storage.deleteReport(id);
     const newHistory = storage.getHistory();
     setHistory(newHistory);
+    
     if (selectedReport?.id === id) {
       setSelectedReport(newHistory[0] || null);
+    }
+  };
+
+  const handleClearHistory = () => {
+    if (window.confirm('Are you sure you want to clear all history? This action cannot be undone.')) {
+      storage.clearHistory();
+      setHistory([]);
+      setSelectedReport(null);
     }
   };
 
@@ -692,12 +704,21 @@ ${recentMarkets || 'This is the first market scan for this period.'}
                   <h1 className="text-4xl font-serif font-bold tracking-tight mb-1">Archive</h1>
                   <p className="text-black/40 text-sm">Browse your collection of past briefings.</p>
                 </div>
-                <button 
-                  onClick={() => setView('reader')}
-                  className="flex items-center gap-2 text-sm font-bold hover:gap-3 transition-all"
-                >
-                  <ArrowLeft className="w-4 h-4" /> Back to Reader
-                </button>
+                <div className="flex items-center gap-4">
+                  <button 
+                    onClick={handleClearHistory}
+                    disabled={history.length === 0}
+                    className="flex items-center gap-2 px-4 py-2 border border-red-200 text-red-500 rounded-xl text-xs font-bold hover:bg-red-50 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                  >
+                    Clear All
+                  </button>
+                  <button 
+                    onClick={() => setView('reader')}
+                    className="flex items-center gap-2 text-sm font-bold hover:gap-3 transition-all"
+                  >
+                    <ArrowLeft className="w-4 h-4" /> Back to Reader
+                  </button>
+                </div>
               </div>
 
               <div className="flex-1 flex gap-8 min-h-0 overflow-hidden">
@@ -761,10 +782,12 @@ ${recentMarkets || 'This is the first market scan for this period.'}
                         )}
 
                         <button 
+                          type="button"
                           onClick={(e) => handleDelete(report.id, e)}
-                          className="absolute top-4 right-4 p-2 rounded-full bg-red-50 text-red-500 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-100 z-10"
+                          title="Delete report"
+                          className="absolute top-4 right-4 p-2 rounded-xl bg-white/80 backdrop-blur-sm text-red-500 opacity-40 hover:opacity-100 transition-all hover:bg-red-500 hover:text-white shadow-sm z-50 border border-red-100 active:scale-95"
                         >
-                          <Trash2 className="w-3 h-3" />
+                          <Trash2 className="w-4 h-4 pointer-events-none" />
                         </button>
                       </div>
                     );

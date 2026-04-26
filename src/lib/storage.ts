@@ -28,6 +28,10 @@ export const storage = {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(newHistory));
   },
 
+  clearHistory: () => {
+    localStorage.removeItem(STORAGE_KEY);
+  },
+
   getLatestReport: (type?: 'morning' | 'evening'): NewsReport | undefined => {
     const history = storage.getHistory();
     if (type) {
