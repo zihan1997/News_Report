@@ -89,71 +89,100 @@ export const generateMarketIntelligence = async (
     timeZone: 'America/Los_Angeles'
   });
 
-  const searchToolName = provider === 'gemini' ? 'Google Search' : 'web_search';
+  try {
+    // 1. Fetch real market data from our API
+    const marketResponse = await fetch("/api/market-data");
+    if (!marketResponse.ok) {
+      throw new Error("Failed to fetch market data");
+    }
+    const { snapshot } = await marketResponse.json();
 
-  const marketPrompt = `
-你是一名首席市场分析师，风格克制、稳健、基于数据。
+    // 2. Prepare the market data for the prompt
+    const marketStatusSummary = snapshot.some((s: any) => s.marketStatus === 'open') ? 'Open' : 'Closed';
+    const tickerJson = JSON.stringify(snapshot.map((s: any) => ({
+      symbol: s.name,
+      price: s.price !== null ? s.price.toLocaleString(undefined, { minimumFractionDigits: 2 }) : "Unknown",
+      change: s.change !== null ? (s.change >= 0 ? "+" : "") + s.change.toFixed(2) : "Unknown",
+      changePercent: s.changePercent !== null ? (s.changePercent >= 0 ? "+" : "") + s.changePercent.toFixed(2) + "%" : "Unknown",
+      marketStatus: s.marketStatus
+    })), null, 2);
+
+    const marketPrompt = `
+你是一名首席市场分析师，风格克制、专业、基于证据（Institutional Style）。
 当前扫描时间：LA Time ${timeStr} (${dateStr})
 
 ### 核心任务：
-提供实时、深度、非戏剧化的市场情报分析。
+将最新的市场数据作为信号层，解读其对 ${dateStr} 候选新闻的“回声”与“反馈”。
+你的目标不是预测涨跌，而是分析市场如何“定价”或“忽略”当前的新闻资讯（Priced-in vs Ignored）。
 
-### 执行规范 (Truthfulness Guidelines)：
-1. **开盘状态检查**：必须首先确认当前时间点 (${timeStr}) 美股及全球主要市场是否处于交易时段。如果休市，必须明确标注 "Market Closed"，且不得编造实时变动。
-2. **拒绝戏剧化**：禁止使用“垂直落体”、“血流成河”、“疯涨”等情绪化词汇。使用“下跌”、“波动”、“回调”、“上涨”等中性词。
-3. **数据真实性**：
-   - 恐惧/贪婪指数、个股价格、期货必须来自可靠来源。
-   - 如果无法获取精确数据，请标注 "Unknown" 或 "Data not available"。
-   - 区分：【实时行情 (Live)】、【市场叙事 (Narrative)】、【情境风险 (Risks)】。
-4. **Ticker 规范**：使用易读的完整名称。
+### 执行规范 (Truthfulness & Signal Guidelines):
+1. **数据唯一性**：必须 **仅且只能** 使用下方提供的 [REAL_TIME_MARKET_SNAPSHOT] 数据。
+2. **严禁编造**：禁止发明价格、期货、OTC 报价或非官方数据。
+3. **降低过度归因 (Reduce Over-attribution)**：
+   - 除非新闻上下文有明确因果证明，否则禁止使用 "because of", "driven by"。
+   - 优先使用专业中性词汇："coincides with", "aligns with", "may reflect", "reinforces the narrative", "appears consistent with"。
+4. **休市管理**：如果观测到休市状态 (${marketStatusSummary})，必须明确标注 "Market Closed"。重点分析“收盘已定价内容”或“当前新闻对下个开盘日的潜在情绪驱动”。
+5. **专业语气**：
+   - 禁止词汇：报复性上涨、硬核 AI 崇拜、疯涨、生死战、核爆级。
+   - 替换为：strong rebound, infrastructure preference, notable signal, valuation pressure, cautious sentiment, sector leadership。
+6. **合规提示**：在分析末尾请注明：This is informational analysis, not financial advice.
 
 ---
 
-**背景参考 (当日快讯)**:
+### [REAL_TIME_MARKET_SNAPSHOT] (Source: Finnhub API)
+${tickerJson}
+
+---
+
+**背景参考 (当日候选新闻)**:
 ${newsContext}
 
 ---
 
 ### 输出要求：
 
-# 市场情报 (Market Intelligence) - ${timeStr} Scan
+# 市场反馈扫描 (Market Reaction Scan) - ${timeStr}
 
-## 1. 核心标的动态 (Tickers)
+## 1. 市场开盘状态 (Market Status)
+- US Equities: ${marketStatusSummary}
+- Data Source: Finnhub Professional API
+- 分析权重：以 [SNAPSHOT] 数据为准，结合 [NEWS] 背景进行中性解读。
+
+## 2. 核心标的数据对照 (Tickers)
 [JSON_TICKERS_BEGIN]
-[
-  {"symbol": "S&P 500 Index", "price": "...", "change": "...", "changePercent": "...", "trend": "up/down/neutral"},
-  {"symbol": "Nasdaq 100 Index", "price": "...", "change": "...", "changePercent": "...", "trend": "up/down/neutral"},
-  {"symbol": "10-Year Treasury Yield", "price": "...", "change": "...", "changePercent": "...", "trend": "up/down/neutral"},
-  {"symbol": "NVIDIA (NVDA)", "price": "...", "change": "...", "changePercent": "...", "trend": "up/down/neutral"},
-  {"symbol": "Bitcoin (BTC)", "price": "...", "change": "...", "changePercent": "...", "trend": "up/down/neutral"}
-]
+${JSON.stringify(snapshot.map((s: any) => ({
+  symbol: s.name,
+  price: s.price !== null ? s.price.toLocaleString(undefined, { minimumFractionDigits: 2 }) : "Unknown",
+  change: s.change !== null ? (s.change >= 0 ? "+" : "") + s.change.toFixed(2) : "Unknown",
+  changePercent: s.changePercent !== null ? (s.changePercent >= 0 ? "+" : "") + s.changePercent.toFixed(2) + "%" : "Unknown",
+  trend: s.change && s.change > 0 ? "up" : s.change && s.change < 0 ? "down" : "neutral"
+})), null, 2)}
 [JSON_TICKERS_END]
-*注：如果休市，以上数据为盘后或昨日收盘价，请加注说明。*
 
-## 2. 市场深度透视
-- **盘面总结**：(当前市场的主导逻辑是什么？)
-- **情绪指标**：(恐惧与贪婪指数状态及因果分析)
-- **重要异动**：(哪些板块或个股表现背离了常态？)
+## 3. 情报解读：新闻与市场的“回声”
+- **确认/定价 (Priced-in)**：(哪些新闻已反映在当前价格变动中？)
+- **无视/钝化 (Ignored)**：(哪些新闻虽有热度，但市场反应平平？)
+- **板块轮向 (Rotation)**：(受益或承压的具体行业分布，如半导体、大科技或宏观指数)
 
-## 3. 🎓 专业名词/标的科普 (Glossary)
-> 针对报告中出现的关键金融术语或复杂标的，提供克制、准确、实用的科普。
+## 4. 市场错位观察 (Mispricing Watch)
+- (哪些重大新闻暂未被明显定价？价格波动是否与新闻逻辑不一致？下一个交易日最值得观察的重新定价点是什么？)
 
-## 4. 风险/机会预警 (Intelligence Alert)
-(基于当前数据的中性预警，不得包含预测性指令)
+## 5. AI 策略观察 (Strategic Feedback)
+- (分析市场当前是在提前定价什么风险或机会？语气需专业、冷静，类似 Bloomberg Brief 工作简报。)
+
+## 6. 🎓 标的/概念科普 (Glossary)
+- (针对本次报告出现的 3-5 个核心标的或名词，提供准确、实用的科普。)
+
+*Disclaimer: This is informational market analysis, not financial advice.*
 `;
 
-  try {
     if (provider === 'gemini') {
       const response = await ai.models.generateContent({
-        model: "gemini-3-pro",
+        model: "gemini-3-flash-preview",
         contents: marketPrompt,
-        config: {
-          tools: [{ googleSearch: {} }],
-        }
       });
       return response.text || "Failed to generate market intelligence.";
     } else {
-      // Fallback for custom server if needed, using the same pattern as generateNews
       const response = await fetch("/api/generate-news", {
         method: "POST",
         headers: { "Content-Type": "application/json" },

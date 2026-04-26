@@ -10,11 +10,62 @@ const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
 import { generateMorningPrompt, generateEveningPrompt } from "./news-helpers";
 
 export const RSS_FEEDS: { source: string; url: string; weight: number; category: SourceCategory }[] = [
+  // Hard News / Global
+  {
+    source: "BBC Top Stories",
+    url: "https://feeds.bbci.co.uk/news/rss.xml",
+    weight: 10,
+    category: "Hard News",
+  },
+  {
+    source: "NYT Top Stories",
+    url: "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml",
+    weight: 10,
+    category: "Hard News",
+  },
+  {
+    source: "CNN International",
+    url: "http://rss.cnn.com/rss/edition.rss",
+    weight: 8,
+    category: "Hard News",
+  },
+
+  // Business / Markets
+  {
+    source: "CNBC Top News",
+    url: "https://www.cnbc.com/id/100003114/device/rss/rss.html",
+    weight: 9,
+    category: "Business",
+  },
+  {
+    source: "WSJ World News",
+    url: "https://feeds.a.dj.com/rss/RSSWorldNews.xml",
+    weight: 9,
+    category: "Business",
+  },
+
+  // Policy / DC
+  {
+    source: "Politico Playbook",
+    url: "https://rss.politico.com/playbook.xml",
+    weight: 8,
+    category: "Policy",
+  },
+
+  // Local / West Coast
+  {
+    source: "LA Times World & Nation",
+    url: "https://www.latimes.com/world-nation/rss2.0.xml",
+    weight: 7,
+    category: "Hard News",
+  },
+
+  // Tech / AI
   {
     source: "BBC Technology",
     url: "https://feeds.bbci.co.uk/news/technology/rss.xml",
-    weight: 9,
-    category: "Hard News",
+    weight: 8,
+    category: "Tech Media",
   },
   {
     source: "The Verge",
@@ -29,28 +80,38 @@ export const RSS_FEEDS: { source: string; url: string; weight: number; category:
     category: "Tech Media",
   },
   {
-    source: "ZDNET",
-    url: "https://www.zdnet.com/news/rss.xml",
-    weight: 6,
-    category: "Tech Media",
-  },
-  {
-    source: "Hacker News",
-    url: "https://hnrss.org/frontpage",
-    weight: 6,
-    category: "Community Signal",
-  },
-  {
     source: "TechCrunch",
     url: "https://techcrunch.com/feed/",
     weight: 8,
     category: "Tech Media",
   },
   {
-    source: "CNET",
-    url: "https://www.cnet.com/rss/news/",
-    weight: 7,
+    source: "ZDNET",
+    url: "https://www.zdnet.com/news/rss.xml",
+    weight: 6,
     category: "Tech Media",
+  },
+
+  // Security
+  {
+    source: "The Hacker News",
+    url: "https://feeds.feedburner.com/TheHackersNews",
+    weight: 8,
+    category: "Security / Specialist",
+  },
+  {
+    source: "BleepingComputer",
+    url: "https://www.bleepingcomputer.com/feed/",
+    weight: 7,
+    category: "Security / Specialist",
+  },
+
+  // Community Signal
+  {
+    source: "Hacker News",
+    url: "https://hnrss.org/frontpage",
+    weight: 6,
+    category: "Community Signal",
   },
 ];
 

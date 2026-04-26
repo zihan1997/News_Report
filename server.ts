@@ -5,6 +5,7 @@ import { fileURLToPath } from "url";
 import OpenAI from "openai";
 import dotenv from "dotenv";
 import { collectNewsFromRSS, filterRecentNews, dedupeNews, rankNews } from "./src/lib/news-workflow.ts";
+import { fetchMarketSnapshot } from "./src/lib/finnhub.ts";
 
 dotenv.config();
 
@@ -28,6 +29,18 @@ async function startServer() {
     } catch (error: any) {
       console.error("RSS Collection Error:", error);
       res.status(500).json({ error: "Failed to collect news from RSS feeds." });
+    }
+  });
+
+  // API Route for market data from Finnhub
+  app.get("/api/market-data", async (req, res) => {
+    try {
+      const symbols = req.query.symbols ? (req.query.symbols as string).split(",") : undefined;
+      const snapshot = await fetchMarketSnapshot(symbols);
+      res.json({ snapshot });
+    } catch (error: any) {
+      console.error("Market Data Error:", error);
+      res.status(500).json({ error: "Failed to fetch market data." });
     }
   });
 

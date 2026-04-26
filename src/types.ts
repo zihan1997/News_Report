@@ -6,6 +6,17 @@ export interface NewsReport {
   timestamp: number;
 }
 
+export type MarketQuote = {
+  symbol: string;
+  name: string;
+  price: number | null;
+  change: number | null;
+  changePercent: number | null;
+  previousClose?: number | null;
+  timestamp?: number | null;
+  marketStatus?: "open" | "closed" | "unknown";
+};
+
 export interface MarketTicker {
   symbol: string;
   price: string;
@@ -21,7 +32,7 @@ export interface MarketIntelligence extends NewsReport {
 
 export type NewsHistory = NewsReport[];
 
-export type SourceCategory = 'Hard News' | 'Tech Media' | 'Community Signal' | 'Security / Specialist' | 'General';
+export type SourceCategory = 'Hard News' | 'Tech Media' | 'Community Signal' | 'Security / Specialist' | 'Business' | 'Policy' | 'General';
 
 export type RawNewsItem = {
   title: string;
