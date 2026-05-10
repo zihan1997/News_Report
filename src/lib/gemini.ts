@@ -91,7 +91,8 @@ export const generateNews = async (
 
 export const generateMarketIntelligence = async (
   provider: 'gemini' | 'ollama',
-  newsContext: string = ''
+  newsContext: string = '',
+  historyContext: string = ''
 ) => {
   const now = new Date();
   const dateStr = now.toLocaleDateString('en-US', { 
@@ -136,6 +137,7 @@ export const generateMarketIntelligence = async (
 ### 核心任务：
 将最新的市场数据作为信号层，解读其对 ${dateStr} 候选新闻的“回声”与“反馈”。
 你的目标不是预测涨跌，而是分析市场如何“定价”或“忽略”当前的新闻资讯（Priced-in vs Ignored）。
+**同时，请结合 [PREVIOUS_MARKET_HISTORY] 维持分析的“连续性”，指出今日行情是延续了之前的趋势，还是出现了逻辑反转。**
 
 ### 执行规范 (Truthfulness & Signal Guidelines):
 1. **数据唯一性**：必须 **仅且只能** 使用下方提供的 [REAL_TIME_MARKET_SNAPSHOT] 数据。
@@ -161,14 +163,18 @@ ${newsContext}
 
 ---
 
+**历史参考 (以往市场研判摘要)**:
+${historyContext}
+
+---
+
 ### 输出要求：
 
 # 市场反馈扫描 (Market Reaction Scan) - ${timeStr}
 
-## 1. 市场开盘状态 (Market Status)
+## 1. 市场状态与研判一致性 (Continuity & Status)
 - US Equities: ${marketStatusSummary}
-- Data Source: Finnhub Professional API
-- 分析权重：以 [SNAPSHOT] 数据为准，结合 [NEWS] 背景进行中性解读。
+- **趋势分析**：(结合历史背景，分析目前的行情走势处于什么阶段？是否验证了之前的逻辑？)
 
 ## 2. 核心标的数据对照 (Tickers)
 [JSON_TICKERS_BEGIN]
@@ -184,13 +190,13 @@ ${JSON.stringify(snapshot.map((s: any) => ({
 ## 3. 情报解读：新闻与市场的“回声”
 - **确认/定价 (Priced-in)**：(哪些新闻已反映在当前价格变动中？)
 - **无视/钝化 (Ignored)**：(哪些新闻虽有热度，但市场反应平平？)
-- **板块轮向 (Rotation)**：(受益或承压的具体行业分布，如半导体、大科技或宏观指数)
+- **板块轮向 (Rotation)**：(受益或承压的具体行业分布)
 
-## 4. 市场错位观察 (Mispricing Watch)
-- (哪些重大新闻暂未被明显定价？价格波动是否与新闻逻辑不一致？下一个交易日最值得观察的重新定价点是什么？)
+## 4. 连续性观察 (Continuity Watch)
+- (哪些重大新闻暂未被明显定价？下一个交易日最值得观察的重新定价点是什么？)
 
-## 5. AI 策略观察 (Strategic Feedback)
-- (分析市场当前是在提前定价什么风险或机会？语气需专业、冷静，类似 Bloomberg Brief 工作简报。)
+## 5. AI 系统研判 (Strategic Insights)
+- (分析市场当前的核心博弈逻辑，分析其对过往趋势的修正或强化。)
 
 ## 6. 🎓 标的/概念科普 (Glossary)
 - (针对本次报告出现的 3-5 个核心标二或名词，提供准确、实用的科普。)

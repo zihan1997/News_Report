@@ -1,13 +1,95 @@
 import RSSParser from "rss-parser";
 import { formatInTimeZone } from "date-fns-tz";
 import { subHours, isWithinInterval } from "date-fns";
-import { RawNewsItem, RankedNewsItem, SourceCategory, RSSHealthStats, Confidence } from "../types";
+import { RawNewsItem, RankedNewsItem, SourceCategory, RSSHealthStats, Confidence, NewsEnrichment } from "../types";
 import { GoogleGenAI } from "@google/genai";
 
 const parser = new RSSParser();
 const LA_TZ = "America/Los_Angeles";
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
 import { generateMorningPrompt, generateEveningPrompt } from "./news-helpers";
+
+const TIER_1_SOURCES = ["Reuters", "AP", "BBC", "WSJ", "NYT", "Bloomberg", "CNBC"];
+const TIER_2_SOURCES = ["Guardian", "CBS", "ABC", "Axios", "Politico", "The Verge"];
+
+async function searchGoogleNews(query: string): Promise<any[]> {
+  try {
+    const encodedQuery = encodeURIComponent(query);
+    const url = `https://news.google.com/rss/search?q=${encodedQuery}&hl=en-US&gl=US&ceid=US:en`;
+    const response = await parser.parseURL(url);
+    return response.items.map(item => ({
+      title: item.title,
+      link: item.link,
+      source: item.source || (item as any).creator || "",
+      publishedAt: item.isoDate || item.pubDate
+    }));
+  } catch (error) {
+    console.error(`Google News Search error for "${query}":`, error);
+    return [];
+  }
+}
+
+export async function enrichNewsItems(items: RankedNewsItem[]): Promise<RankedNewsItem[]> {
+  // Enrich top 10 items in parallel
+  const topItems = items.slice(0, 10);
+  const remainingItems = items.slice(10);
+
+  const enrichmentPromises = topItems.map(async (item) => {
+    try {
+      const searchResults = await searchGoogleNews(item.title);
+      if (searchResults.length === 0) return item;
+
+      const matchedSources = new Set<string>();
+      let tier1Count = 0;
+      let latestHeadline = searchResults[0].title;
+
+      const filteredResults = [];
+      for (const res of searchResults) {
+        const sourceName = res.source || "";
+        const isTier1 = TIER_1_SOURCES.some(s => sourceName.includes(s));
+        const isTier2 = TIER_2_SOURCES.some(s => sourceName.includes(s));
+
+        if (isTier1 || isTier2) {
+          if (!matchedSources.has(sourceName)) {
+            matchedSources.add(sourceName);
+            if (isTier1) tier1Count++;
+            filteredResults.push(res);
+          }
+        }
+        if (filteredResults.length >= 5) break;
+      }
+
+      // If no tier 1/2, just take the first few results
+      if (filteredResults.length === 0) {
+        searchResults.slice(0, 3).forEach(res => {
+          if (res.source) matchedSources.add(res.source);
+          filteredResults.push(res);
+        });
+      }
+
+      const totalTrusted = matchedSources.size;
+      let confidenceAdjustment: "low" | "medium" | "high" = "low";
+      if (totalTrusted >= 4) confidenceAdjustment = "high";
+      else if (totalTrusted >= 2) confidenceAdjustment = "medium";
+
+      const enrichment: NewsEnrichment = {
+        confirmations: totalTrusted,
+        sources: Array.from(matchedSources).slice(0, 5),
+        latestHeadline: latestHeadline,
+        confidenceAdjustment,
+        openQuestion: "最新的进展是否会改变之前的预测？" // Placeholder, Gemini will refine
+      };
+
+      return { ...item, enrichment };
+    } catch (error) {
+      console.error(`Enrichment failed for ${item.title}:`, error);
+      return item;
+    }
+  });
+
+  const enrichedTop = await Promise.all(enrichmentPromises);
+  return [...enrichedTop, ...remainingItems];
+}
 
 export const RSS_FEEDS: { source: string; url: string; weight: number; category: SourceCategory }[] = [
   // Hard News / Global

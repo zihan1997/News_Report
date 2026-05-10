@@ -46,12 +46,21 @@ export type RawNewsItem = {
   sourceWeight: number;
 };
 
+export type NewsEnrichment = {
+  confirmations: number;
+  sources: string[];
+  latestHeadline: string;
+  confidenceAdjustment: "low" | "medium" | "high";
+  openQuestion: string;
+};
+
 export type RankedNewsItem = RawNewsItem & {
   score: number;
   matchedKeywords: string[];
   recencyHours?: number;
   confirmationCount: number;
   confidence: Confidence;
+  enrichment?: NewsEnrichment;
 };
 
 export type RSSHealthStats = {

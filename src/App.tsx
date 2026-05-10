@@ -38,6 +38,7 @@ export default function App() {
   const [selectedReport, setSelectedReport] = useState<NewsReport | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [view, setView] = useState<'reader' | 'history' | 'markets'>('reader');
+  const [historyFilter, setHistoryFilter] = useState<'all' | 'news' | 'market'>('all');
   const [error, setError] = useState<string | null>(null);
   const [healthStatus, setHealthStatus] = useState<'loading' | 'ok' | 'error'>('loading');
   const [rssStats, setRssStats] = useState<RSSHealthStats | null>(null);
@@ -108,7 +109,7 @@ export default function App() {
         .map(r => `[PREVIOUS MARKET SCAN ${formatInTimeZone(new Date(r.date), LA_TZ, 'HH:mm')}]\n${r.content.substring(0, 1000)}...`) // Substring to save tokens
         .join('\n\n---\n\n');
 
-      const fullContext = `
+      const newsContext = `
 CURRENT TIME: ${currentTimeStr} (LA Time)
 
 === RECENT NEWS HISTORY ===
@@ -116,12 +117,9 @@ ${recentNews}
 
 === TODAY'S NEWEST UPDATES ===
 ${todayNews || 'No news briefings generated yet for today.'}
-
-=== PREVIOUS MARKET ANALYSES (MEMORY) ===
-${recentMarkets || 'This is the first market scan for this period.'}
 `.trim();
 
-      const rawContent = await generateMarketIntelligence(provider, fullContext);
+      const rawContent = await generateMarketIntelligence(provider, newsContext, recentMarkets);
       
       // Extract Tickers JSON
       let tickers: MarketTicker[] = [];
@@ -689,11 +687,10 @@ ${recentMarkets || 'This is the first market scan for this period.'}
 
                       <div className="bg-white border border-black/5 p-8 rounded-[3rem] space-y-6">
                         <h3 className="text-xs font-bold uppercase tracking-widest text-black/40">Market Sessions</h3>
-                        <div className="space-y-3">
+                        <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
                           {history
                             .filter(r => r.type === 'market')
                             .sort((a, b) => b.timestamp - a.timestamp)
-                            .slice(0, 5)
                             .map((report) => (
                             <button 
                               key={report.id}
@@ -713,7 +710,23 @@ ${recentMarkets || 'This is the first market scan for this period.'}
                               </div>
                             </button>
                           ))}
+                          
+                          {history.filter(r => r.type === 'market').length === 0 && (
+                            <div className="text-center py-8 opacity-20">
+                              <p className="text-[10px] font-bold uppercase tracking-widest">No previous scans</p>
+                            </div>
+                          )}
                         </div>
+
+                        <button 
+                          onClick={() => {
+                            setHistoryFilter('market');
+                            setView('history');
+                          }}
+                          className="w-full py-3 text-[10px] font-bold uppercase tracking-widest text-black/40 hover:text-black hover:bg-black/5 rounded-2xl transition-all"
+                        >
+                          View Full History
+                        </button>
                       </div>
                    </aside>
                  </div>
@@ -749,6 +762,22 @@ ${recentMarkets || 'This is the first market scan for this period.'}
                   <p className="text-black/40 text-sm">Browse your collection of past briefings.</p>
                 </div>
                 <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-1 bg-black/5 p-1 rounded-xl mr-4">
+                    {['all', 'news', 'market'].map((f) => (
+                      <button
+                        key={f}
+                        onClick={() => setHistoryFilter(f as any)}
+                        className={cn(
+                          "px-4 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all",
+                          historyFilter === f 
+                            ? "bg-white text-black shadow-sm" 
+                            : "text-black/30 hover:text-black/60"
+                        )}
+                      >
+                        {f}
+                      </button>
+                    ))}
+                  </div>
                   <button 
                     onClick={handleClearHistory}
                     disabled={history.length === 0}
@@ -768,7 +797,13 @@ ${recentMarkets || 'This is the first market scan for this period.'}
               <div className="flex-1 flex gap-8 min-h-0 overflow-hidden">
                 {/* Left List - 35% */}
                 <div className="w-[35%] flex flex-col gap-4 overflow-y-auto pr-4 custom-scrollbar">
-                  {history.map((report) => {
+                  {history
+                    .filter(r => {
+                      if (historyFilter === 'all') return true;
+                      if (historyFilter === 'news') return r.type !== 'market';
+                      return r.type === 'market';
+                    })
+                    .map((report) => {
                     const title = report.content.split('\n')[0].replace('# ', '') || 'Daily Briefing';
                     const keywords = report.content
                       .split('\n')
@@ -784,14 +819,10 @@ ${recentMarkets || 'This is the first market scan for this period.'}
                         tabIndex={0}
                         onClick={() => {
                           setSelectedReport(report);
-                          if (report.type === 'market') setView('markets');
-                          else setView('reader');
                         }}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter' || e.key === ' ') {
                             setSelectedReport(report);
-                            if (report.type === 'market') setView('markets');
-                            else setView('reader');
                           }
                         }}
                         className={cn(
@@ -852,14 +883,32 @@ ${recentMarkets || 'This is the first market scan for this period.'}
                       <div className="flex items-center gap-3 mb-8">
                         <span className={cn(
                           "px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider",
-                          selectedReport.type === 'morning' ? "bg-amber-100 text-amber-700" : "bg-indigo-100 text-indigo-700"
+                          selectedReport.type === 'morning' ? "bg-amber-100 text-amber-700" : 
+                          selectedReport.type === 'evening' ? "bg-indigo-100 text-indigo-700" : "bg-purple-100 text-purple-700"
                         )}>
-                          {selectedReport.type === 'morning' ? 'Morning' : 'Evening'}
+                          {selectedReport.type === 'morning' ? 'Morning' : 
+                           selectedReport.type === 'evening' ? 'Evening' : 'Market'}
                         </span>
                         <span className="text-xs text-black/40 font-bold uppercase tracking-widest">
                           {formatInTimeZone(new Date(selectedReport.date), LA_TZ, 'MMMM do, yyyy · HH:mm')}
                         </span>
                       </div>
+                      
+                      {selectedReport.type === 'market' && (selectedReport as MarketIntelligence).tickers?.length > 0 && (
+                        <div className="flex flex-wrap gap-2 mb-8">
+                          {(selectedReport as MarketIntelligence).tickers.map((ticker, idx) => (
+                            <div key={idx} className="bg-black/5 px-3 py-2 rounded-xl flex items-center gap-2">
+                              <span className="text-[10px] font-bold opacity-30">{ticker.symbol}</span>
+                              <span className="text-xs font-bold">{ticker.price}</span>
+                              <span className={cn(
+                                "text-[10px] font-bold",
+                                ticker.trend === 'up' ? "text-emerald-600" : 
+                                ticker.trend === 'down' ? "text-rose-600" : "text-slate-600"
+                              )}>{ticker.changePercent}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                       
                       <div className="markdown-body">
                         <ReactMarkdown>{selectedReport.content}</ReactMarkdown>

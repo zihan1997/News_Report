@@ -4,7 +4,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import OpenAI from "openai";
 import dotenv from "dotenv";
-import { collectNewsFromRSS, filterRecentNews, dedupeNews, rankNews } from "./src/lib/news-workflow.ts";
+import { collectNewsFromRSS, filterRecentNews, dedupeNews, rankNews, enrichNewsItems } from "./src/lib/news-workflow.ts";
 import { fetchMarketSnapshot } from "./src/lib/finnhub.ts";
 
 dotenv.config();
@@ -25,7 +25,8 @@ async function startServer() {
       const recent = filterRecentNews(items);
       const deduped = dedupeNews(recent);
       const ranked = rankNews(deduped);
-      res.json({ news: ranked, stats });
+      const enriched = await enrichNewsItems(ranked);
+      res.json({ news: enriched, stats });
     } catch (error: any) {
       console.error("RSS Collection Error:", error);
       res.status(500).json({ error: "Failed to collect news from RSS feeds." });
