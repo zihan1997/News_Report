@@ -2,12 +2,9 @@ import RSSParser from "rss-parser";
 import { formatInTimeZone } from "date-fns-tz";
 import { subHours, isWithinInterval } from "date-fns";
 import { RawNewsItem, RankedNewsItem, SourceCategory, RSSHealthStats, Confidence, NewsEnrichment } from "../types";
-import { GoogleGenAI } from "@google/genai";
 
 const parser = new RSSParser();
 const LA_TZ = "America/Los_Angeles";
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
-import { generateMorningPrompt, generateEveningPrompt } from "./news-helpers";
 
 const TIER_1_SOURCES = ["Reuters", "AP", "BBC", "WSJ", "NYT", "Bloomberg", "CNBC"];
 const TIER_2_SOURCES = ["Guardian", "CBS", "ABC", "Axios", "Politico", "The Verge"];
@@ -206,36 +203,6 @@ export async function verifyWithGoogleSearchIfNeeded(items: RankedNewsItem[], pr
     return items;
   }
   return items;
-}
-
-export async function generateMorningReportWithGemini(rankedItems: RankedNewsItem[], previousContext: string): Promise<string> {
-  const today = formatInTimeZone(new Date(), LA_TZ, "EEEE, MMMM dd, yyyy");
-  const prompt = generateMorningPrompt(rankedItems, today, previousContext);
-  
-  const response = await ai.models.generateContent({
-    model: "gemini-3-flash-preview",
-    contents: prompt,
-    config: {
-      tools: rankedItems.length < 10 ? [{ googleSearch: {} }] : undefined,
-    }
-  });
-
-  return response.text || "";
-}
-
-export async function generateEveningReportWithGemini(rankedItems: RankedNewsItem[], previousContext: string): Promise<string> {
-  const today = formatInTimeZone(new Date(), LA_TZ, "EEEE, MMMM dd, yyyy");
-  const prompt = generateEveningPrompt(rankedItems, today, previousContext);
-  
-  const response = await ai.models.generateContent({
-    model: "gemini-3-flash-preview",
-    contents: prompt,
-    config: {
-      tools: rankedItems.length < 6 ? [{ googleSearch: {} }] : undefined,
-    }
-  });
-
-  return response.text || "";
 }
 
 const PRIORITY_KEYWORDS = {

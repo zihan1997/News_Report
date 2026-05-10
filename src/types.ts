@@ -1,10 +1,15 @@
 export interface NewsReport {
   id: string;
-  date: string; // ISO date string
+  date: string; // ISO date string with the report's local timezone offset
   type: 'morning' | 'evening' | 'market';
   content: string; // Markdown content
   timestamp: number;
 }
+
+export type LlmRuntime = 'local' | 'cloud';
+export type ReportDepth = 'fast' | 'balanced' | 'wide';
+export type AppView = 'reader' | 'history' | 'markets';
+export type HistoryFilter = 'all' | 'news' | 'market';
 
 export type MarketQuote = {
   symbol: string;
