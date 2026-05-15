@@ -1,6 +1,7 @@
 import { LlmRuntime, MarketQuote, MarketTicker, NewsReport } from "../../types";
 import marketTemplate from "../../prompts/market-intelligence.md?raw";
 import { fillTemplate } from "../../lib/prompt-template";
+import { getMemoryContext } from "../../lib/memory";
 import { StreamCallbacks, streamLlmReport } from "../../shared/lib/llm-stream";
 
 export async function generateMarketIntelligence(
@@ -49,12 +50,23 @@ export async function generateMarketIntelligence(
     trend: quote.change && quote.change > 0 ? "up" : quote.change && quote.change < 0 ? "down" : "neutral",
   }));
 
+  const memoryContext = await getMemoryContext([
+    "market",
+    newsContext.slice(0, 3500),
+    historyContext.slice(0, 1500),
+    tickerJson,
+  ].join("\n\n"));
+  if (memoryContext) {
+    callbacks.onLog?.("Memory context loaded.");
+  }
+
   const marketPrompt = fillTemplate(marketTemplate, {
     timeStr,
     dateStr,
     tickerJson,
     newsContext,
     historyContext,
+    memoryContext: memoryContext || "无",
     marketStatusSummary,
   });
 

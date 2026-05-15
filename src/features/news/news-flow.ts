@@ -1,5 +1,6 @@
 import { LlmRuntime, NewsReport, RankedNewsItem, ReportDepth } from "../../types";
 import { generateEveningPrompt, generateMorningPrompt } from "../../lib/news-helpers";
+import { getMemoryContext } from "../../lib/memory";
 import { StreamCallbacks, streamLlmReport } from "../../shared/lib/llm-stream";
 
 const REPORT_DEPTH_OPTIONS: Record<ReportDepth, {
@@ -59,9 +60,21 @@ export async function generateNews(
   callbacks.onLog?.(`RSS ready: ${stats?.successCount ?? news.length}/${stats?.totalSources ?? "?"} sources.`);
 
   const scope = REPORT_DEPTH_OPTIONS[depth];
+  const memoryQuery = [
+    type,
+    previousContext.slice(0, 2500),
+    news.slice(0, scope.candidateCount)
+      .map((item) => `${item.title} ${item.category || ""} ${item.source}`)
+      .join("\n"),
+  ].join("\n\n");
+  const memoryContext = await getMemoryContext(memoryQuery);
+  if (memoryContext) {
+    callbacks.onLog?.("Memory context loaded.");
+  }
+
   const prompt = type === "morning"
-    ? generateMorningPrompt(news, today, previousContext, scope)
-    : generateEveningPrompt(news, today, previousContext, scope);
+    ? generateMorningPrompt(news, today, previousContext, memoryContext, scope)
+    : generateEveningPrompt(news, today, previousContext, memoryContext, scope);
 
   callbacks.onLog?.(`Prompt ready: about ${Math.ceil(prompt.length / 4)} tokens by rough estimate.`);
   callbacks.onLog?.(`Coverage: ${depth} (${scope.candidateCount} candidates, ${scope.outputRange} final items).`);

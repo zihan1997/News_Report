@@ -31,6 +31,7 @@ export function generateMorningPrompt(
   rankedItems: RankedNewsItem[],
   today: string,
   previousContext: string,
+  memoryContext: string,
   scope: PromptScope = DEFAULT_SCOPE
 ): string {
   const selectedItems = rankedItems.slice(0, scope.candidateCount);
@@ -47,6 +48,7 @@ export function generateMorningPrompt(
     today,
     outputRange: scope.outputRange,
     previousContext: previousContext || "无",
+    memoryContext: memoryContext || "无",
     newsList,
     lowerPriorityNewsList,
   });
@@ -56,6 +58,7 @@ export function generateEveningPrompt(
   rankedItems: RankedNewsItem[],
   today: string,
   previousContext: string,
+  memoryContext: string,
   scope: PromptScope = DEFAULT_SCOPE
 ): string {
   const selectedItems = rankedItems.slice(0, scope.candidateCount);
@@ -65,6 +68,7 @@ export function generateEveningPrompt(
     today,
     outputRange: scope.outputRange,
     previousContext,
+    memoryContext: memoryContext || "无",
     newsList,
   });
 }

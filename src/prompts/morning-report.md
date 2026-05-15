@@ -58,6 +58,11 @@
 
 ---
 
+【Story / Narrative Memory】：
+{{memoryContext}}
+
+---
+
 【今日候选列表】：
 {{newsList}}
 

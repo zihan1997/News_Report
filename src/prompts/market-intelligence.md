@@ -37,6 +37,11 @@
 
 ---
 
+[STORY_NARRATIVE_MEMORY]
+{{memoryContext}}
+
+---
+
 [PREVIOUS_MARKET_HISTORY]
 {{historyContext}}
 

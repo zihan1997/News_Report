@@ -8,7 +8,7 @@ export interface NewsReport {
 
 export type LlmRuntime = 'local' | 'cloud';
 export type ReportDepth = 'fast' | 'balanced' | 'wide';
-export type AppView = 'reader' | 'history' | 'markets';
+export type AppView = 'reader' | 'history' | 'markets' | 'memory';
 export type HistoryFilter = 'all' | 'news' | 'market';
 
 export type MarketQuote = {

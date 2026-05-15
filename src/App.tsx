@@ -5,8 +5,10 @@ import { formatInTimeZone } from 'date-fns-tz';
 import { NewsReaderView } from './features/news/components/NewsReaderView';
 import { HistoryView } from './features/history/components/HistoryView';
 import { MarketView } from './features/market/components/MarketView';
+import { MemoryView } from './features/memory/components/MemoryView';
 import { cn } from './shared/lib/classnames';
 import { storage } from './lib/storage';
+import { updateMemoryFromReport } from './lib/memory';
 import { buildMorningHistoryContext } from './features/news/news-context';
 import { generateNews } from './features/news/news-flow';
 import { generateMarketIntelligence } from './features/market/market-flow';
@@ -19,9 +21,18 @@ function getLocalReportDate(date: Date) {
   return formatInTimeZone(date, LA_TZ, "yyyy-MM-dd'T'HH:mm:ssXXX");
 }
 
+function formatMs(ms?: number) {
+  return `${Math.max(0, Math.round(ms || 0)).toLocaleString()} ms`;
+}
+
+function formatTokenCount(value?: number | null) {
+  return typeof value === "number" && Number.isFinite(value) ? value.toLocaleString() : "n/a";
+}
+
 const NAV_TABS: Array<{ id: AppView; label: string }> = [
   { id: 'reader', label: 'Intelligence' },
   { id: 'markets', label: 'Markets' },
+  { id: 'memory', label: 'Memory' },
   { id: 'history', label: 'History' },
 ];
 
@@ -177,6 +188,19 @@ ${todayNews || 'No news briefings generated yet for today.'}
       };
 
       const newHistory = await storage.saveReport(newMarketReport);
+      appendGenerationLog("Start to parse to knowledge memory.");
+      updateMemoryFromReport(newMarketReport, llmRuntime)
+        .then((memoryUpdate) => {
+          const metrics = memoryUpdate.metrics;
+          const status = memoryUpdate.skipped ? "Memory update skipped" : "Memory updated";
+          appendGenerationLog(
+            `${status}. Updates: ${memoryUpdate.updates.length}, drafts: ${memoryUpdate.newCandidates.length}, response: ${formatMs(metrics?.responseMs)}, parse: ${formatMs(metrics?.parseMs)}, tokens: ${formatTokenCount(metrics?.totalTokens ?? metrics?.outputTokensEstimate)}.`
+          );
+        })
+        .catch((memoryError) => {
+          console.error('Memory update failed', memoryError);
+          appendGenerationLog("Memory update skipped.");
+        });
       setHistory(newHistory);
       setSelectedReport(newMarketReport);
     } catch (err) {
@@ -265,6 +289,19 @@ ${todayNews || 'No news briefings generated yet for today.'}
       };
       
       const newHistory = await storage.saveReport(newReport);
+      appendGenerationLog("Start to parse to knowledge memory.");
+      updateMemoryFromReport(newReport, llmRuntime)
+        .then((memoryUpdate) => {
+          const metrics = memoryUpdate.metrics;
+          const status = memoryUpdate.skipped ? "Memory update skipped" : "Memory updated";
+          appendGenerationLog(
+            `${status}. Updates: ${memoryUpdate.updates.length}, drafts: ${memoryUpdate.newCandidates.length}, response: ${formatMs(metrics?.responseMs)}, parse: ${formatMs(metrics?.parseMs)}, tokens: ${formatTokenCount(metrics?.totalTokens ?? metrics?.outputTokensEstimate)}.`
+          );
+        })
+        .catch((memoryError) => {
+          console.error('Memory update failed', memoryError);
+          appendGenerationLog("Memory update skipped.");
+        });
       setHistory(newHistory);
       setSelectedReport(newReport);
       setView('reader');
@@ -450,6 +487,15 @@ ${todayNews || 'No news briefings generated yet for today.'}
                   setView('history');
                 }}
               />
+            </motion.div>
+          ) : view === 'memory' ? (
+            <motion.div
+              key="memory"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+            >
+              <MemoryView />
             </motion.div>
           ) : (
             <motion.div

@@ -26,7 +26,7 @@ type NewsReaderViewProps = {
   onReportDepthChange: (depth: ReportDepth) => void;
   onGenerate: (type: "morning" | "evening") => void;
   onSelectReport: (report: NewsReport) => void;
-  onViewChange: (view: "reader" | "history" | "markets") => void;
+  onViewChange: (view: "reader" | "history" | "markets" | "memory") => void;
   onHistoryFilterChange: (filter: HistoryFilter) => void;
 };
 
@@ -250,7 +250,7 @@ function ArchiveByDate({
   history: NewsHistory;
   selectedReport: NewsReport | null;
   onSelectReport: (report: NewsReport) => void;
-  onViewChange: (view: "reader" | "history" | "markets") => void;
+  onViewChange: (view: "reader" | "history" | "markets" | "memory") => void;
   onHistoryFilterChange: (filter: HistoryFilter) => void;
 }) {
   const groupedReports = Object.entries(

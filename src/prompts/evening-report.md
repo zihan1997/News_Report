@@ -21,6 +21,11 @@
 {{previousContext}}
 ---
 
+Story / Narrative Memory：
+---
+{{memoryContext}}
+---
+
 晚间新增/验证资讯列表：
 ---
 {{newsList}}

@@ -52,7 +52,7 @@ export async function streamLlmReport(
         reasoning += event.delta;
         callbacks.onReasoning?.(event.delta, reasoning);
       } else if (event.type === "done") {
-        callbacks.onLog?.(`Done. Streamed ${event.tokenCount} content chunks, ${event.reasoningCount || 0} reasoning chunks.`);
+        callbacks.onLog?.(`Done. Streamed ${event.tokenCount} content chunks and ${event.reasoningCount || 0} reasoning chunks.`);
         return event.content || content;
       } else if (event.type === "error") {
         throw new Error(event.error || "LLM stream failed.");
