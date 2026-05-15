@@ -188,18 +188,17 @@ ${todayNews || 'No news briefings generated yet for today.'}
       };
 
       const newHistory = await storage.saveReport(newMarketReport);
-      appendGenerationLog("Start to parse to knowledge memory.");
+      appendGenerationLog("Market scan saved. Checking for draft-only knowledge candidates.");
       updateMemoryFromReport(newMarketReport, llmRuntime)
         .then((memoryUpdate) => {
           const metrics = memoryUpdate.metrics;
-          const status = memoryUpdate.skipped ? "Memory update skipped" : "Memory updated";
           appendGenerationLog(
-            `${status}. Updates: ${memoryUpdate.updates.length}, drafts: ${memoryUpdate.newCandidates.length}, response: ${formatMs(metrics?.responseMs)}, parse: ${formatMs(metrics?.parseMs)}, tokens: ${formatTokenCount(metrics?.totalTokens ?? metrics?.outputTokensEstimate)}.`
+            `Market memory review complete. Official updates skipped, draft candidates: ${memoryUpdate.newCandidates.length}, response: ${formatMs(metrics?.responseMs)}, parse: ${formatMs(metrics?.parseMs)}, tokens: ${formatTokenCount(metrics?.totalTokens ?? metrics?.outputTokensEstimate)}.`
           );
         })
         .catch((memoryError) => {
-          console.error('Memory update failed', memoryError);
-          appendGenerationLog("Memory update skipped.");
+          console.error('Market memory draft review failed', memoryError);
+          appendGenerationLog("Market memory draft review skipped.");
         });
       setHistory(newHistory);
       setSelectedReport(newMarketReport);

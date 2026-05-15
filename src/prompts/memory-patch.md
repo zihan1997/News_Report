@@ -9,6 +9,7 @@ Core rule:
 - Use only target ids listed in AVAILABLE TARGET IDS.
 - Do not invent target ids.
 - If there is no high-value memory update, return {"updates":[],"newCandidates":[]}.
+- For market reports, do not update official memory. Market reports may only suggest newCandidates for human review.
 
 Evidence boundary:
 - Use only the provided report and existing memory.
@@ -24,6 +25,13 @@ Update rules:
 - evidence should contain short factual support from the report.
 - openGaps should contain only unresolved questions that still matter.
 - Keep at most 8 updates.
+
+Story vs narrative separation:
+- A story update describes the concrete event itself: what happened, who/what was involved, and what changed in that event line.
+- A narrative update describes what the event does to a broader thesis: whether it strengthens, weakens, reframes, or exposes a gap in the long-running narrative.
+- If the same report updates both a story and a narrative from the same evidence, the two summaries must not be near-duplicates.
+- Do not create near-duplicate story and narrative summaries for the same evidence.
+- Do not use a narrative summary to merely restate the story event. It must explain the implication for the narrative.
 
 New candidate rules:
 - Use newCandidates only when the report introduces a high-value story or narrative that clearly does not fit existing targets.

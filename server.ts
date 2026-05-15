@@ -888,6 +888,7 @@ async function startServer() {
         res.status(400).json({ error: "Invalid report payload." });
         return;
       }
+      const draftOnly = report.type === "market";
 
       const { client, config } = getLlmClient(runtime);
       const existingMemories = await readMemoryFiles();
@@ -909,6 +910,9 @@ async function startServer() {
             role: "user",
             content: [
               memoryPatchPrompt,
+              draftOnly
+                ? "Market report rule: return no updates. Market reports may only create newCandidates for human review when they reveal a genuinely new high-value story or narrative. Do not update existing official memory from a market report."
+                : "",
               "",
               "[AVAILABLE TARGET IDS]",
               formatTargetList(existingMemories),
@@ -987,6 +991,9 @@ async function startServer() {
       const parseMs = Date.now() - parseStarted;
       await ensureMemoryDirs();
       const patch = validateMemoryPatch(rawPatch, existingMemories);
+      if (draftOnly) {
+        patch.updates = [];
+      }
       if (patch.updates.length === 0 && patch.newCandidates.length === 0) {
         res.json({
           event: null,
@@ -994,6 +1001,7 @@ async function startServer() {
           updates: [],
           newCandidates: [],
           skipped: true,
+          reason: draftOnly ? "market_draft_review_empty" : undefined,
           metrics: {
             promptTokensEstimate: promptTokenEstimate,
             responseMs: completionMs,
@@ -1008,14 +1016,16 @@ async function startServer() {
         return;
       }
 
-      const event = await writeMemoryEvent(report, patch.updates, patch.newCandidates);
+      const event = draftOnly ? null : await writeMemoryEvent(report, patch.updates, patch.newCandidates);
       const drafts = await writeMemoryDrafts(report, patch.newCandidates);
-      const written = await applyMemoryUpdates(report, patch.updates, existingMemories);
+      const written = draftOnly ? [] : await applyMemoryUpdates(report, patch.updates, existingMemories);
       res.json({
         event,
         drafts,
         updates: written,
         newCandidates: patch.newCandidates,
+        skippedOfficialUpdates: draftOnly,
+        reason: draftOnly ? "market_draft_review" : undefined,
         metrics: {
           promptTokensEstimate: promptTokenEstimate,
           responseMs: completionMs,

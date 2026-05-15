@@ -43,10 +43,12 @@ export function MemoryView() {
   const [selectedId, setSelectedId] = useState("");
   const [mode, setMode] = useState<MemoryMode>("stories");
   const [isLoading, setIsLoading] = useState(true);
+  const [refreshSpinKey, setRefreshSpinKey] = useState(0);
   const [draftActionKey, setDraftActionKey] = useState("");
   const [error, setError] = useState<string | null>(null);
 
-  const loadMemory = async () => {
+  const loadMemory = async (animate = false) => {
+    if (animate) setRefreshSpinKey((current) => current + 1);
     setIsLoading(true);
     setError(null);
     try {
@@ -133,10 +135,14 @@ export function MemoryView() {
             ))}
           </div>
           <button
-            onClick={loadMemory}
+            onClick={() => loadMemory(true)}
             className="memory-refresh-button"
           >
-            {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+            {isLoading ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCw key={refreshSpinKey} className="memory-refresh-icon h-4 w-4" />
+            )}
             System Refresh
           </button>
         </div>
@@ -412,6 +418,23 @@ function ActivityPanel({
 }) {
   const candidateCount = drafts.flatMap((draft) => draft.newCandidates).length;
   const [openReview, setOpenReview] = useState("");
+  const activityItems = useMemo(() => {
+    const eventItems = events.map((event) => ({
+      kind: "event" as const,
+      key: event.fileName,
+      timestamp: new Date(event.createdAt || event.reportDate).getTime(),
+      event,
+    }));
+    const draftItems = drafts.map((draft) => ({
+      kind: "draft" as const,
+      key: draft.fileName,
+      timestamp: new Date(draft.reportDate).getTime(),
+      draft,
+    }));
+    return [...eventItems, ...draftItems]
+      .sort((a, b) => b.timestamp - a.timestamp)
+      .slice(0, 15);
+  }, [events, drafts]);
 
   return (
     <div className="memory-activity-stack">
@@ -550,18 +573,47 @@ function ActivityPanel({
             </div>
             <h3 className="text-[10px] font-bold uppercase tracking-[0.2em] text-black/40">Propagation Log</h3>
           </div>
-          <span className="font-mono text-[10px] font-bold text-black/25">{events.length} Entries</span>
+          <span className="font-mono text-[10px] font-bold text-black/25">{activityItems.length} Entries</span>
         </div>
 
         <div className="memory-event-list custom-scrollbar">
-          {events.slice(0, 15).map((event, index) => (
-            <motion.div key={event.fileName} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: Math.min(index * 0.025, 0.18) }}>
-              <EventCard event={event} />
+          {activityItems.map((item, index) => (
+            <motion.div key={item.key} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: Math.min(index * 0.025, 0.18) }}>
+              {item.kind === "event" ? <EventCard event={item.event} /> : <DraftLogCard draft={item.draft} />}
             </motion.div>
           ))}
-          {events.length === 0 && <EmptyMini label="Log stream empty" />}
+          {activityItems.length === 0 && <EmptyMini label="Log stream empty" />}
         </div>
       </section>
+    </div>
+  );
+}
+
+function DraftLogCard({ draft }: { draft: MemoryDraft }) {
+  const eventDate = new Date(draft.reportDate);
+  return (
+    <div className="memory-event-card group">
+      <div className="mb-4 flex items-center justify-between gap-3 font-mono">
+        <div className="flex items-center gap-2">
+          <div className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+          <span className="max-w-[150px] truncate text-[9px] font-bold uppercase tracking-widest text-black/30">
+            {draft.reportType} draft
+          </span>
+        </div>
+        <span className="text-[10px] font-bold text-black/20">{formatInTimeZone(eventDate, LA_TZ, "MMM d, HH:mm")}</span>
+      </div>
+      <div className="space-y-2.5">
+        {draft.newCandidates.map((candidate, index) => (
+          <div key={`${draft.fileName}-${index}`} className="memory-event-update">
+            <div className="memory-event-target">
+              <span className="memory-event-target-type">{candidate.targetType}</span>
+              <span className="memory-event-target-separator">::</span>
+              <span className="memory-event-target-id">draft candidate</span>
+            </div>
+            <p className="text-[11px] font-medium leading-relaxed text-black/65">{candidate.title}</p>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

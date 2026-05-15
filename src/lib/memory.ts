@@ -10,6 +10,8 @@ type MemoryUpdateResponse = {
   updates: string[];
   newCandidates: unknown[];
   skipped?: boolean;
+  skippedOfficialUpdates?: boolean;
+  reason?: "market_report" | string;
   metrics?: {
     promptTokensEstimate?: number;
     responseMs?: number;

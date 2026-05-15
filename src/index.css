@@ -153,6 +153,24 @@
   background: rgba(0, 0, 0, 0.84);
 }
 
+.memory-refresh-button:active {
+  transform: translateY(0) scale(0.985);
+}
+
+.memory-refresh-icon {
+  animation: memory-refresh-once 520ms cubic-bezier(0.22, 1, 0.36, 1);
+  transform-origin: center;
+}
+
+@keyframes memory-refresh-once {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .memory-section-label {
   display: flex;
   align-items: center;

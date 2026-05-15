@@ -8,7 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "clean": "rm -rf dist",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "audit:memory": "node scripts/audit-memory.mjs"
   },
   "dependencies": {
     "@tailwindcss/typography": "^0.5.19",

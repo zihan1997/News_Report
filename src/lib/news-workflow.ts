@@ -9,21 +9,70 @@ const LA_TZ = "America/Los_Angeles";
 const TIER_1_SOURCES = ["Reuters", "AP", "BBC", "WSJ", "NYT", "Bloomberg", "CNBC"];
 const TIER_2_SOURCES = ["Guardian", "CBS", "ABC", "Axios", "Politico", "The Verge"];
 
+function uniqueQueries(queries: string[]) {
+  const seen = new Set<string>();
+  return queries
+    .map((query) => query.replace(/\s+/g, " ").trim())
+    .filter((query) => {
+      const key = query.toLowerCase();
+      if (!query || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
+function buildGoogleNewsQueries(query: string) {
+  const clean = query
+    .replace(/[“”"']/g, "")
+    .replace(/\s+-\s+[^-]+$/g, "")
+    .replace(/\s+\|\s+.+$/g, "")
+    .replace(/\([^)]*\)/g, " ")
+    .trim();
+  const words = clean.split(/\s+/).filter(Boolean);
+  const stopWords = new Set(["the", "a", "an", "to", "by", "of", "for", "in", "on", "and", "or", "with", "as", "at", "from"]);
+  const keywords = words
+    .filter((word) => !stopWords.has(word.toLowerCase()))
+    .slice(0, 10)
+    .join(" ");
+  const compact = words.slice(0, 12).join(" ");
+
+  return uniqueQueries([
+    query,
+    clean,
+    compact,
+    keywords,
+  ]).slice(0, 4);
+}
+
 async function searchGoogleNews(query: string): Promise<any[]> {
-  try {
-    const encodedQuery = encodeURIComponent(query);
-    const url = `https://news.google.com/rss/search?q=${encodedQuery}&hl=en-US&gl=US&ceid=US:en`;
-    const response = await parser.parseURL(url);
-    return response.items.map(item => ({
-      title: item.title,
-      link: item.link,
-      source: item.source || (item as any).creator || "",
-      publishedAt: item.isoDate || item.pubDate
-    }));
-  } catch (error) {
-    console.error(`Google News Search error for "${query}":`, error);
-    return [];
+  const attempts = buildGoogleNewsQueries(query);
+  const errors: string[] = [];
+
+  for (const attempt of attempts) {
+    try {
+      const encodedQuery = encodeURIComponent(attempt);
+      const url = `https://news.google.com/rss/search?q=${encodedQuery}&hl=en-US&gl=US&ceid=US:en`;
+      const response = await parser.parseURL(url);
+      const results = response.items.map(item => ({
+        title: item.title,
+        link: item.link,
+        source: item.source || (item as any).creator || "",
+        publishedAt: item.isoDate || item.pubDate
+      }));
+      if (results.length > 0) {
+        if (attempt !== query) {
+          console.warn(`Google News retry succeeded for "${query}" with query "${attempt}".`);
+        }
+        return results;
+      }
+      errors.push(`"${attempt}" returned 0 results`);
+    } catch (error) {
+      errors.push(`"${attempt}" failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
+
+  console.error(`Google News Search failed after ${attempts.length} attempts for "${query}": ${errors.join(" | ")}`);
+  return [];
 }
 
 export async function enrichNewsItems(items: RankedNewsItem[]): Promise<RankedNewsItem[]> {
