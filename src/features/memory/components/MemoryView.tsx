@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import {
   Activity,
   ArrowUpRight,
@@ -16,6 +16,7 @@ import {
   Info,
   Layers3,
   Loader2,
+  Move,
   RefreshCw,
   Sparkles,
   Zap,
@@ -37,11 +38,46 @@ import {
 const LA_TZ = "America/Los_Angeles";
 
 type MemoryMode = "stories" | "narratives";
+type MemorySurface = "console" | "board";
+type BoardPanelId = "metrics" | "index" | "detail" | "drafts" | "review" | "log";
+
+type BoardPanelLayout = {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+};
+
+type BoardLayoutState = Record<BoardPanelId, BoardPanelLayout>;
+
+const BOARD_LAYOUT_STORAGE_KEY = "signal-desk-memory-board-layout-v1";
+
+const DEFAULT_BOARD_LAYOUT: BoardLayoutState = {
+  metrics: { x: 72, y: 24, w: 520, h: 150 },
+  index: { x: 72, y: 210, w: 430, h: 720 },
+  detail: { x: 538, y: 210, w: 820, h: 720 },
+  drafts: { x: 1394, y: 210, w: 430, h: 330 },
+  review: { x: 1394, y: 574, w: 430, h: 330 },
+  log: { x: 1394, y: 938, w: 430, h: 440 },
+};
+
+function loadBoardLayout() {
+  if (typeof window === "undefined") return DEFAULT_BOARD_LAYOUT;
+  try {
+    const raw = window.localStorage.getItem(BOARD_LAYOUT_STORAGE_KEY);
+    if (!raw) return DEFAULT_BOARD_LAYOUT;
+    return { ...DEFAULT_BOARD_LAYOUT, ...JSON.parse(raw) } as BoardLayoutState;
+  } catch {
+    return DEFAULT_BOARD_LAYOUT;
+  }
+}
 
 export function MemoryView() {
   const [memory, setMemory] = useState<MemoryReviewResponse | null>(null);
   const [selectedId, setSelectedId] = useState("");
   const [mode, setMode] = useState<MemoryMode>("stories");
+  const [surface, setSurface] = useState<MemorySurface>("console");
+  const [boardLayout, setBoardLayout] = useState<BoardLayoutState>(() => loadBoardLayout());
   const [isLoading, setIsLoading] = useState(true);
   const [refreshSpinKey, setRefreshSpinKey] = useState(0);
   const [draftActionKey, setDraftActionKey] = useState("");
@@ -66,6 +102,10 @@ export function MemoryView() {
   useEffect(() => {
     loadMemory();
   }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem(BOARD_LAYOUT_STORAGE_KEY, JSON.stringify(boardLayout));
+  }, [boardLayout]);
 
   const items = mode === "narratives" ? memory?.narratives || [] : memory?.stories || [];
   const selectedItem = useMemo(
@@ -93,6 +133,18 @@ export function MemoryView() {
       color: "text-amber-500",
     },
   ];
+
+  const handleBoardLayoutChange = (panel: BoardPanelId, patch: Partial<BoardPanelLayout>) => {
+    setBoardLayout((current) => ({
+      ...current,
+      [panel]: {
+        ...current[panel],
+        ...patch,
+      },
+    }));
+  };
+
+  const resetBoardLayout = () => setBoardLayout(DEFAULT_BOARD_LAYOUT);
 
   const handleDraftAction = async (fileName: string, candidateIndex: number, action: "promote" | "dismiss") => {
     const actionKey = `${fileName}-${candidateIndex}-${action}`;
@@ -129,6 +181,18 @@ export function MemoryView() {
         </div>
 
         <div className="memory-hero-actions">
+          <div className="memory-surface-toggle">
+            {(["console", "board"] as MemorySurface[]).map((item) => (
+              <button
+                key={item}
+                type="button"
+                onClick={() => setSurface(item)}
+                className={cn("memory-surface-option", surface === item && "memory-surface-option-active")}
+              >
+                {item}
+              </button>
+            ))}
+          </div>
           <div className="memory-telemetry">
             {stats.map((stat) => (
               <MetricPill key={stat.label} icon={stat.icon} label={stat.label} value={stat.value} color={stat.color} />
@@ -166,6 +230,27 @@ export function MemoryView() {
             <p className="font-mono text-[10px] font-bold uppercase tracking-widest text-black/20">Accessing datastores...</p>
           </div>
         </div>
+      ) : surface === "board" ? (
+        <MemoryBoard
+          stats={stats}
+          mode={mode}
+          items={items}
+          selectedItem={selectedItem}
+          selectedId={selectedItem?.id || ""}
+          latestTargetIds={latestTargetIds}
+          memory={memory}
+          layout={boardLayout}
+          actionKey={draftActionKey}
+          onLayoutChange={handleBoardLayoutChange}
+          onResetLayout={resetBoardLayout}
+          onModeChange={(nextMode) => {
+            setMode(nextMode);
+            const nextItems = nextMode === "narratives" ? memory?.narratives || [] : memory?.stories || [];
+            setSelectedId(nextItems[0]?.id || "");
+          }}
+          onSelect={setSelectedId}
+          onDraftAction={handleDraftAction}
+        />
       ) : (
         <div className="memory-workbench">
           <motion.div initial={{ opacity: 0, x: -16 }} animate={{ opacity: 1, x: 0 }} className="memory-column flex flex-col gap-4">
@@ -214,6 +299,227 @@ export function MemoryView() {
         </div>
       )}
     </div>
+  );
+}
+
+function MemoryBoard({
+  stats,
+  mode,
+  items,
+  selectedItem,
+  selectedId,
+  latestTargetIds,
+  memory,
+  layout,
+  actionKey,
+  onLayoutChange,
+  onResetLayout,
+  onModeChange,
+  onSelect,
+  onDraftAction,
+}: {
+  stats: Array<{ label: string; value: number; icon: any; color: string }>;
+  mode: MemoryMode;
+  items: MemoryItem[];
+  selectedItem: MemoryItem | null;
+  selectedId: string;
+  latestTargetIds: Set<string>;
+  memory: MemoryReviewResponse | null;
+  layout: BoardLayoutState;
+  actionKey: string;
+  onLayoutChange: (panel: BoardPanelId, patch: Partial<BoardPanelLayout>) => void;
+  onResetLayout: () => void;
+  onModeChange: (mode: MemoryMode) => void;
+  onSelect: (id: string) => void;
+  onDraftAction: (fileName: string, candidateIndex: number, action: "promote" | "dismiss") => void;
+}) {
+  return (
+    <section className="memory-board-shell">
+      <div className="memory-board-toolbar">
+        <div>
+          <div className="memory-board-kicker">
+            <Move className="h-3.5 w-3.5" />
+            Spatial Memory Board
+          </div>
+          <p>Drag widget headers to arrange the workspace. Pull the lower-right corner to resize.</p>
+        </div>
+        <button type="button" onClick={onResetLayout} className="memory-board-reset">
+          Reset layout
+        </button>
+      </div>
+
+      <div className="memory-board-canvas">
+        <BoardWidget
+          id="metrics"
+          title="System Metrics"
+          icon={Activity}
+          layout={layout.metrics}
+          minW={360}
+          minH={120}
+          onLayoutChange={onLayoutChange}
+        >
+          <div className="memory-board-metrics">
+            {stats.map((stat) => (
+              <MetricPill key={stat.label} icon={stat.icon} label={stat.label} value={stat.value} color={stat.color} />
+            ))}
+          </div>
+        </BoardWidget>
+
+        <BoardWidget
+          id="index"
+          title="Knowledge Base"
+          icon={Database}
+          layout={layout.index}
+          minW={320}
+          minH={420}
+          onLayoutChange={onLayoutChange}
+        >
+          <MemoryIndex
+            mode={mode}
+            items={items}
+            latestTargetIds={latestTargetIds}
+            selectedId={selectedId}
+            onModeChange={onModeChange}
+            onSelect={onSelect}
+          />
+        </BoardWidget>
+
+        <BoardWidget
+          id="detail"
+          title="Reader Console"
+          icon={BrainCircuit}
+          layout={layout.detail}
+          minW={520}
+          minH={460}
+          onLayoutChange={onLayoutChange}
+        >
+          <MemoryDetail item={selectedItem} mode={mode} />
+        </BoardWidget>
+
+        <BoardWidget
+          id="drafts"
+          title="Draft Candidates"
+          icon={Sparkles}
+          layout={layout.drafts}
+          minW={340}
+          minH={260}
+          onLayoutChange={onLayoutChange}
+        >
+          <DraftCandidatesPanel drafts={memory?.drafts || []} actionKey={actionKey} onDraftAction={onDraftAction} />
+        </BoardWidget>
+
+        <BoardWidget
+          id="review"
+          title="Review Trail"
+          icon={CheckCircle2}
+          layout={layout.review}
+          minW={340}
+          minH={260}
+          onLayoutChange={onLayoutChange}
+        >
+          <ReviewTrailPanel reviewTrail={memory?.reviewTrail || []} />
+        </BoardWidget>
+
+        <BoardWidget
+          id="log"
+          title="Propagation Log"
+          icon={Activity}
+          layout={layout.log}
+          minW={340}
+          minH={320}
+          onLayoutChange={onLayoutChange}
+        >
+          <PropagationLogPanel events={memory?.events || []} drafts={memory?.drafts || []} />
+        </BoardWidget>
+      </div>
+    </section>
+  );
+}
+
+function BoardWidget({
+  id,
+  title,
+  icon: Icon,
+  layout,
+  minW,
+  minH,
+  onLayoutChange,
+  children,
+}: {
+  id: BoardPanelId;
+  title: string;
+  icon: any;
+  layout: BoardPanelLayout;
+  minW: number;
+  minH: number;
+  onLayoutChange: (panel: BoardPanelId, patch: Partial<BoardPanelLayout>) => void;
+  children: ReactNode;
+}) {
+  const beginDrag = (event: ReactMouseEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const start = { ...layout };
+
+    const onMove = (moveEvent: globalThis.MouseEvent) => {
+      onLayoutChange(id, {
+        x: Math.max(0, start.x + moveEvent.clientX - startX),
+        y: Math.max(0, start.y + moveEvent.clientY - startY),
+      });
+    };
+
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  };
+
+  const beginResize = (event: ReactMouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const start = { ...layout };
+
+    const onMove = (moveEvent: globalThis.MouseEvent) => {
+      onLayoutChange(id, {
+        w: Math.max(minW, start.w + moveEvent.clientX - startX),
+        h: Math.max(minH, start.h + moveEvent.clientY - startY),
+      });
+    };
+
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  };
+
+  return (
+    <motion.article
+      className="memory-board-widget"
+      style={{
+        left: layout.x,
+        top: layout.y,
+        width: layout.w,
+        height: layout.h,
+      }}
+    >
+      <div className="memory-board-widget-handle" onMouseDown={beginDrag}>
+        <div className="flex items-center gap-2">
+          <Icon className="h-3.5 w-3.5 text-black/35" />
+          <span>{title}</span>
+        </div>
+        <Move className="h-4 w-4 text-black/16" />
+      </div>
+      <div className="memory-board-widget-body custom-scrollbar">{children}</div>
+      <button type="button" aria-label={`Resize ${title}`} className="memory-board-resize-handle" onMouseDown={beginResize} />
+    </motion.article>
   );
 }
 
@@ -416,8 +722,6 @@ function ActivityPanel({
   actionKey: string;
   onDraftAction: (fileName: string, candidateIndex: number, action: "promote" | "dismiss") => void;
 }) {
-  const candidateCount = drafts.flatMap((draft) => draft.newCandidates).length;
-  const [openReview, setOpenReview] = useState("");
   const activityItems = useMemo(() => {
     const eventItems = events.map((event) => ({
       kind: "event" as const,
@@ -438,154 +742,211 @@ function ActivityPanel({
 
   return (
     <div className="memory-activity-stack">
-      <section className="memory-draft-panel">
-        <div className="memory-draft-watermark">
-          <Sparkles className="h-40 w-40" />
-        </div>
-
-        <div className="relative z-10">
-          <div className="mb-6 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="rounded-xl bg-white/20 p-2 backdrop-blur-sm">
-                <Sparkles className="h-5 w-5 text-white" />
-              </div>
-              <h3 className="font-mono text-xs font-bold uppercase tracking-widest text-white">Draft Candidates</h3>
-            </div>
-            <span className="rounded-full bg-white/20 px-3 py-1 font-mono text-sm font-bold backdrop-blur-sm">{candidateCount}</span>
-          </div>
-
-          <div className="space-y-4">
-            {drafts.flatMap((draft) =>
-              draft.newCandidates.map((candidate, index) => (
-                <motion.div
-                  key={`${draft.fileName}-${index}`}
-                  initial={{ opacity: 0, x: 14 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  className="memory-draft-card group/card"
-                >
-                  <div className="mb-2 flex items-center justify-between">
-                    <span className="font-mono text-[9px] font-bold uppercase tracking-widest text-amber-600">{candidate.targetType} candidate</span>
-                    <ArrowUpRight className="h-3.5 w-3.5 text-amber-600 opacity-0 transition-opacity group-hover/card:opacity-100" />
-                  </div>
-                  <div className="mb-2 font-serif text-xl font-bold">{candidate.title}</div>
-                  <p className="text-xs italic leading-relaxed text-black/50">&quot;{candidate.reason}&quot;</p>
-                  <div className="memory-draft-actions">
-                    <button
-                      type="button"
-                      className="memory-draft-action memory-draft-action-primary"
-                      disabled={Boolean(actionKey)}
-                      onClick={() => onDraftAction(draft.fileName, index, "promote")}
-                    >
-                      {actionKey === `${draft.fileName}-${index}-promote` ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <Check className="h-3.5 w-3.5" />
-                      )}
-                      Promote
-                    </button>
-                    <button
-                      type="button"
-                      className="memory-draft-action memory-draft-action-muted"
-                      disabled={Boolean(actionKey)}
-                      onClick={() => onDraftAction(draft.fileName, index, "dismiss")}
-                    >
-                      {actionKey === `${draft.fileName}-${index}-dismiss` ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <EyeOff className="h-3.5 w-3.5" />
-                      )}
-                      Dismiss
-                    </button>
-                  </div>
-                </motion.div>
-              ))
-            )}
-            {candidateCount === 0 && (
-              <div className="rounded-3xl border border-white/30 bg-white px-6 py-8 text-center font-mono text-[10px] font-bold uppercase tracking-[0.2em] text-amber-700 shadow-sm">
-                No draft candidates pending
-              </div>
-            )}
-          </div>
-        </div>
-      </section>
-
-      <section className="memory-review-panel">
-        <div className="mb-5 flex items-center justify-between px-1">
-          <div className="flex items-center gap-3">
-            <div className="rounded-xl bg-black/[0.03] p-2">
-              <CheckCircle2 className="h-4 w-4 text-black/40" />
-            </div>
-            <h3 className="text-[10px] font-bold uppercase tracking-[0.2em] text-black/40">Review Trail</h3>
-          </div>
-          <span className="font-mono text-[10px] font-bold text-black/25">{reviewTrail.length} Decisions</span>
-        </div>
-
-        <div className="space-y-3">
-          {reviewTrail.slice(0, 6).map((review) => (
-            <button
-              key={review.fileName}
-              type="button"
-              onClick={() => setOpenReview((current) => current === review.fileName ? "" : review.fileName)}
-              className="memory-review-card"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="mb-1 flex items-center gap-2">
-                    <span className={cn("memory-review-badge", review.action === "promote" ? "memory-review-badge-promote" : "memory-review-badge-dismiss")}>
-                      {review.action === "promote" ? "Promoted" : "Dismissed"}
-                    </span>
-                    <span className="font-mono text-[9px] font-bold uppercase tracking-widest text-black/25">{review.candidate.targetType}</span>
-                  </div>
-                  <div className="line-clamp-2 font-serif text-base font-bold leading-tight text-black">{review.candidate.title}</div>
-                </div>
-                <span className="shrink-0 font-mono text-[9px] font-bold text-black/25">
-                  {formatInTimeZone(new Date(review.reviewedAt), LA_TZ, "MM-dd HH:mm")}
-                </span>
-              </div>
-              {openReview === review.fileName && (
-                <div className="mt-3 border-t border-black/5 pt-3 text-left">
-                  <p className="text-xs leading-relaxed text-black/55">{review.candidate.reason}</p>
-                  {review.promoted && (
-                    <p className="mt-2 font-mono text-[9px] font-bold uppercase tracking-widest text-emerald-600">
-                      Created {review.promoted.targetType} :: {review.promoted.targetId}
-                    </p>
-                  )}
-                  {review.candidate.evidence.length > 0 && (
-                    <ul className="mt-2 space-y-1 text-[11px] leading-relaxed text-black/45">
-                      {review.candidate.evidence.slice(0, 3).map((item, index) => (
-                        <li key={`${review.fileName}-evidence-${index}`}>- {item}</li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              )}
-            </button>
-          ))}
-          {reviewTrail.length === 0 && <EmptyMini label="No review decisions yet" />}
-        </div>
-      </section>
-
-      <section className="memory-log-panel">
-        <div className="mb-6 flex items-center justify-between px-1">
-          <div className="flex items-center gap-3">
-            <div className="rounded-xl bg-black/[0.03] p-2">
-              <Activity className="h-4 w-4 text-black/40" />
-            </div>
-            <h3 className="text-[10px] font-bold uppercase tracking-[0.2em] text-black/40">Propagation Log</h3>
-          </div>
-          <span className="font-mono text-[10px] font-bold text-black/25">{activityItems.length} Entries</span>
-        </div>
-
-        <div className="memory-event-list custom-scrollbar">
-          {activityItems.map((item, index) => (
-            <motion.div key={item.key} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: Math.min(index * 0.025, 0.18) }}>
-              {item.kind === "event" ? <EventCard event={item.event} /> : <DraftLogCard draft={item.draft} />}
-            </motion.div>
-          ))}
-          {activityItems.length === 0 && <EmptyMini label="Log stream empty" />}
-        </div>
-      </section>
+      <DraftCandidatesPanel drafts={drafts} actionKey={actionKey} onDraftAction={onDraftAction} />
+      <ReviewTrailPanel reviewTrail={reviewTrail} />
+      <PropagationLogPanel events={events} drafts={drafts} activityItems={activityItems} />
     </div>
+  );
+}
+
+function DraftCandidatesPanel({
+  drafts,
+  actionKey,
+  onDraftAction,
+}: {
+  drafts: MemoryDraft[];
+  actionKey: string;
+  onDraftAction: (fileName: string, candidateIndex: number, action: "promote" | "dismiss") => void;
+}) {
+  const candidateCount = drafts.flatMap((draft) => draft.newCandidates).length;
+
+  return (
+    <section className="memory-draft-panel">
+      <div className="memory-draft-watermark">
+        <Sparkles className="h-40 w-40" />
+      </div>
+
+      <div className="relative z-10">
+        <div className="mb-6 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="rounded-xl bg-white/20 p-2 backdrop-blur-sm">
+              <Sparkles className="h-5 w-5 text-white" />
+            </div>
+            <h3 className="font-mono text-xs font-bold uppercase tracking-widest text-white">Draft Candidates</h3>
+          </div>
+          <span className="rounded-full bg-white/20 px-3 py-1 font-mono text-sm font-bold backdrop-blur-sm">{candidateCount}</span>
+        </div>
+
+        <div className="space-y-4">
+          {drafts.flatMap((draft) =>
+            draft.newCandidates.map((candidate, index) => (
+              <motion.div
+                key={`${draft.fileName}-${index}`}
+                initial={{ opacity: 0, x: 14 }}
+                animate={{ opacity: 1, x: 0 }}
+                className="memory-draft-card group/card"
+              >
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="font-mono text-[9px] font-bold uppercase tracking-widest text-amber-600">{candidate.targetType} candidate</span>
+                  <ArrowUpRight className="h-3.5 w-3.5 text-amber-600 opacity-0 transition-opacity group-hover/card:opacity-100" />
+                </div>
+                <div className="mb-2 font-serif text-xl font-bold">{candidate.title}</div>
+                <p className="text-xs italic leading-relaxed text-black/50">&quot;{candidate.reason}&quot;</p>
+                <div className="memory-draft-actions">
+                  <button
+                    type="button"
+                    className="memory-draft-action memory-draft-action-primary"
+                    disabled={Boolean(actionKey)}
+                    onClick={() => onDraftAction(draft.fileName, index, "promote")}
+                  >
+                    {actionKey === `${draft.fileName}-${index}-promote` ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Check className="h-3.5 w-3.5" />
+                    )}
+                    Promote
+                  </button>
+                  <button
+                    type="button"
+                    className="memory-draft-action memory-draft-action-muted"
+                    disabled={Boolean(actionKey)}
+                    onClick={() => onDraftAction(draft.fileName, index, "dismiss")}
+                  >
+                    {actionKey === `${draft.fileName}-${index}-dismiss` ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <EyeOff className="h-3.5 w-3.5" />
+                    )}
+                    Dismiss
+                  </button>
+                </div>
+              </motion.div>
+            ))
+          )}
+          {candidateCount === 0 && (
+            <div className="rounded-3xl border border-white/30 bg-white px-6 py-8 text-center font-mono text-[10px] font-bold uppercase tracking-[0.2em] text-amber-700 shadow-sm">
+              No draft candidates pending
+            </div>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function ReviewTrailPanel({ reviewTrail }: { reviewTrail: MemoryDraftReview[] }) {
+  const [openReview, setOpenReview] = useState("");
+
+  return (
+    <section className="memory-review-panel">
+      <div className="mb-5 flex items-center justify-between px-1">
+        <div className="flex items-center gap-3">
+          <div className="rounded-xl bg-black/[0.03] p-2">
+            <CheckCircle2 className="h-4 w-4 text-black/40" />
+          </div>
+          <h3 className="text-[10px] font-bold uppercase tracking-[0.2em] text-black/40">Review Trail</h3>
+        </div>
+        <span className="font-mono text-[10px] font-bold text-black/25">{reviewTrail.length} Decisions</span>
+      </div>
+
+      <div className="space-y-3">
+        {reviewTrail.slice(0, 6).map((review) => (
+          <button
+            key={review.fileName}
+            type="button"
+            onClick={() => setOpenReview((current) => current === review.fileName ? "" : review.fileName)}
+            className="memory-review-card"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="mb-1 flex items-center gap-2">
+                  <span className={cn("memory-review-badge", review.action === "promote" ? "memory-review-badge-promote" : "memory-review-badge-dismiss")}>
+                    {review.action === "promote" ? "Promoted" : "Dismissed"}
+                  </span>
+                  <span className="font-mono text-[9px] font-bold uppercase tracking-widest text-black/25">{review.candidate.targetType}</span>
+                </div>
+                <div className="line-clamp-2 font-serif text-base font-bold leading-tight text-black">{review.candidate.title}</div>
+              </div>
+              <span className="shrink-0 font-mono text-[9px] font-bold text-black/25">
+                {formatInTimeZone(new Date(review.reviewedAt), LA_TZ, "MM-dd HH:mm")}
+              </span>
+            </div>
+            {openReview === review.fileName && (
+              <div className="mt-3 border-t border-black/5 pt-3 text-left">
+                <p className="text-xs leading-relaxed text-black/55">{review.candidate.reason}</p>
+                {review.promoted && (
+                  <p className="mt-2 font-mono text-[9px] font-bold uppercase tracking-widest text-emerald-600">
+                    Created {review.promoted.targetType} :: {review.promoted.targetId}
+                  </p>
+                )}
+                {review.candidate.evidence.length > 0 && (
+                  <ul className="mt-2 space-y-1 text-[11px] leading-relaxed text-black/45">
+                    {review.candidate.evidence.slice(0, 3).map((item, index) => (
+                      <li key={`${review.fileName}-evidence-${index}`}>- {item}</li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+          </button>
+        ))}
+        {reviewTrail.length === 0 && <EmptyMini label="No review decisions yet" />}
+      </div>
+    </section>
+  );
+}
+
+type ActivityItem =
+  | { kind: "event"; key: string; timestamp: number; event: MemoryEvent }
+  | { kind: "draft"; key: string; timestamp: number; draft: MemoryDraft };
+
+function PropagationLogPanel({
+  events,
+  drafts,
+  activityItems,
+}: {
+  events: MemoryEvent[];
+  drafts: MemoryDraft[];
+  activityItems?: ActivityItem[];
+}) {
+  const items = useMemo(() => {
+    if (activityItems) return activityItems;
+    const eventItems = events.map((event) => ({
+      kind: "event" as const,
+      key: event.fileName,
+      timestamp: new Date(event.createdAt || event.reportDate).getTime(),
+      event,
+    }));
+    const draftItems = drafts.map((draft) => ({
+      kind: "draft" as const,
+      key: draft.fileName,
+      timestamp: new Date(draft.reportDate).getTime(),
+      draft,
+    }));
+    return [...eventItems, ...draftItems].sort((a, b) => b.timestamp - a.timestamp).slice(0, 15);
+  }, [activityItems, events, drafts]);
+
+  return (
+    <section className="memory-log-panel">
+      <div className="mb-6 flex items-center justify-between px-1">
+        <div className="flex items-center gap-3">
+          <div className="rounded-xl bg-black/[0.03] p-2">
+            <Activity className="h-4 w-4 text-black/40" />
+          </div>
+          <h3 className="text-[10px] font-bold uppercase tracking-[0.2em] text-black/40">Propagation Log</h3>
+        </div>
+        <span className="font-mono text-[10px] font-bold text-black/25">{items.length} Entries</span>
+      </div>
+
+      <div className="memory-event-list custom-scrollbar">
+        {items.map((item, index) => (
+          <motion.div key={item.key} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: Math.min(index * 0.025, 0.18) }}>
+            {item.kind === "event" ? <EventCard event={item.event} /> : <DraftLogCard draft={item.draft} />}
+          </motion.div>
+        ))}
+        {items.length === 0 && <EmptyMini label="Log stream empty" />}
+      </div>
+    </section>
   );
 }
 
