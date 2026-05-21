@@ -20,9 +20,12 @@ const MEMORY_DRAFTS_DIR = path.join(MEMORY_DIR, "drafts");
 const MEMORY_REVIEW_DIR = path.join(MEMORY_DIR, "review");
 const MEMORY_PROMOTED_DIR = path.join(MEMORY_REVIEW_DIR, "promoted");
 const MEMORY_DISMISSED_DIR = path.join(MEMORY_REVIEW_DIR, "dismissed");
+const MEMORY_CONSOLIDATIONS_DIR = path.join(MEMORY_REVIEW_DIR, "consolidations");
+const MEMORY_PENDING_CONSOLIDATIONS_DIR = path.join(MEMORY_REVIEW_DIR, "pending-consolidations");
 const SYSTEM_PROMPT_PATH = path.join(__dirname, "src", "prompts", "system-report.md");
 const FINAL_OUTPUT_INSTRUCTION_PATH = path.join(__dirname, "src", "prompts", "final-output-instruction.md");
 const MEMORY_PATCH_PROMPT_PATH = path.join(__dirname, "src", "prompts", "memory-patch.md");
+const MEMORY_CONSOLIDATE_PROMPT_PATH = path.join(__dirname, "src", "prompts", "memory-consolidate.md");
 const LA_TZ = "America/Los_Angeles";
 
 dotenv.config({ path: path.join(__dirname, ".env.local"), override: true });
@@ -90,6 +93,23 @@ type MemoryEventFile = {
   path: string;
   data: any;
   timestamp: number;
+};
+
+type MemoryTargetType = "story" | "narrative";
+
+type MemoryConsolidationProposal = {
+  currentState?: string;
+  resolved?: string[];
+  openGaps?: string[];
+  weakSignals?: string[];
+  openQuestions?: string[];
+  watchlist?: string[];
+};
+
+type PendingConsolidationResult = {
+  targetType: MemoryTargetType;
+  targetId: string;
+  fileName: string;
 };
 
 class MissingJsonObjectError extends Error {
@@ -187,6 +207,8 @@ async function ensureMemoryDirs() {
   await fs.mkdir(MEMORY_DRAFTS_DIR, { recursive: true });
   await fs.mkdir(MEMORY_PROMOTED_DIR, { recursive: true });
   await fs.mkdir(MEMORY_DISMISSED_DIR, { recursive: true });
+  await fs.mkdir(MEMORY_CONSOLIDATIONS_DIR, { recursive: true });
+  await fs.mkdir(MEMORY_PENDING_CONSOLIDATIONS_DIR, { recursive: true });
 }
 
 function tokenizeForSearch(text: string) {
@@ -309,6 +331,47 @@ function safeMemoryJsonName(fileName: unknown) {
   return clean;
 }
 
+function memoryDirForTarget(targetType: MemoryTargetType) {
+  return targetType === "narrative" ? NARRATIVES_DIR : STORIES_DIR;
+}
+
+function memoryPathForTarget(targetType: MemoryTargetType, targetId: string) {
+  const safeId = targetId.replace(/[^a-z0-9-]/gi, "");
+  if (!safeId || safeId !== targetId) return "";
+  return path.join(memoryDirForTarget(targetType), `${safeId}.md`);
+}
+
+function pendingConsolidationFileName(targetType: MemoryTargetType, targetId: string) {
+  const safeId = targetId.replace(/[^a-z0-9-]/gi, "");
+  if (!safeId || safeId !== targetId) return "";
+  return `${targetType}-${safeId}.json`;
+}
+
+function extractSection(content: string, heading: string) {
+  return content.match(new RegExp(`## ${heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s+([\\s\\S]*?)(?=\\n## |$)`))?.[1]?.trim() || "";
+}
+
+function replaceSection(content: string, heading: string, sectionContent: string) {
+  const nextSection = `## ${heading}\n${sectionContent.trim()}\n`;
+  const pattern = new RegExp(`## ${heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s+[\\s\\S]*?(?=\\n## |$)`);
+  if (pattern.test(content)) {
+    return content.replace(pattern, nextSection.trimEnd());
+  }
+  return `${content.trimEnd()}\n\n${nextSection}`;
+}
+
+function bulletSection(items: string[]) {
+  return items.map((item) => `- ${truncateText(item, 520)}`).join("\n");
+}
+
+function updateLastUpdatedToNow(content: string) {
+  const stamp = formatInTimeZone(new Date(), LA_TZ, "yyyy-MM-dd HH:mm");
+  if (/^Last Updated: .+$/m.test(content)) {
+    return content.replace(/^Last Updated: .+$/m, `Last Updated: ${stamp} LA`);
+  }
+  return content;
+}
+
 function normalizeStringArray(value: unknown, maxItems: number, maxChars: number) {
   if (!Array.isArray(value)) return [];
   return value
@@ -372,6 +435,28 @@ function validateMemoryPatch(raw: any, memories: MemoryFile[]) {
   }
 
   return { updates, newCandidates };
+}
+
+function validateConsolidationProposal(raw: any, targetType: MemoryTargetType): MemoryConsolidationProposal {
+  const currentState = truncateText(raw?.currentState, 1200);
+  if (!currentState) {
+    throw new Error("Consolidation proposal missing currentState.");
+  }
+
+  if (targetType === "story") {
+    return {
+      currentState,
+      resolved: normalizeStringArray(raw?.resolved, 6, 360),
+      openGaps: normalizeStringArray(raw?.openGaps, 8, 360),
+    };
+  }
+
+  return {
+    currentState,
+    weakSignals: normalizeStringArray(raw?.weakSignals, 6, 360),
+    openQuestions: normalizeStringArray(raw?.openQuestions, 8, 360),
+    watchlist: normalizeStringArray(raw?.watchlist, 8, 360),
+  };
 }
 
 function extractJsonObject(text: string) {
@@ -472,6 +557,25 @@ async function createMemoryUpdateCompletion(client: any, model: string, messages
     } as any);
   } catch (error: any) {
     console.warn(`Memory update JSON mode unavailable; retrying without response_format. ${error?.status || ""} ${error?.message || ""}`.trim());
+    return await client.chat.completions.create(baseParams as any);
+  }
+}
+
+async function createJsonCompletion(client: any, model: string, messages: any[], maxTokens = 1800) {
+  const baseParams = {
+    model,
+    messages,
+    temperature: 0.1,
+    max_tokens: maxTokens,
+  };
+
+  try {
+    return await client.chat.completions.create({
+      ...baseParams,
+      response_format: { type: "json_object" },
+    } as any);
+  } catch (error: any) {
+    console.warn(`JSON mode unavailable; retrying without response_format. ${error?.status || ""} ${error?.message || ""}`.trim());
     return await client.chat.completions.create(baseParams as any);
   }
 }
@@ -787,6 +891,208 @@ async function applyMemoryUpdates(report: StoredReport, updates: MemoryPatchUpda
   return written;
 }
 
+function consolidationSections(targetType: MemoryTargetType, content: string) {
+  if (targetType === "story") {
+    return {
+      "Current State": extractSection(content, "Current State"),
+      "Resolved": extractSection(content, "Resolved"),
+      "Open Gaps": extractSection(content, "Open Gaps"),
+    };
+  }
+
+  return {
+    "Current State": extractSection(content, "Current State"),
+    "Weak Signals / Evidence Against": extractSection(content, "Weak Signals / Evidence Against"),
+    "Open Questions": extractSection(content, "Open Questions"),
+    "Watchlist": extractSection(content, "Watchlist"),
+  };
+}
+
+function applyConsolidationToContent(content: string, targetType: MemoryTargetType, proposal: MemoryConsolidationProposal) {
+  let nextContent = updateLastUpdatedToNow(content);
+  nextContent = replaceSection(nextContent, "Current State", proposal.currentState || "");
+
+  if (targetType === "story") {
+    nextContent = replaceSection(nextContent, "Resolved", bulletSection(proposal.resolved || []));
+    nextContent = replaceSection(nextContent, "Open Gaps", bulletSection(proposal.openGaps || []));
+  } else {
+    nextContent = replaceSection(nextContent, "Weak Signals / Evidence Against", bulletSection(proposal.weakSignals || []));
+    nextContent = replaceSection(nextContent, "Open Questions", bulletSection(proposal.openQuestions || []));
+    nextContent = replaceSection(nextContent, "Watchlist", bulletSection(proposal.watchlist || []));
+  }
+
+  return nextContent.trimEnd() + "\n";
+}
+
+async function proposeMemoryConsolidationForTarget({
+  client,
+  model,
+  targetType,
+  targetId,
+  content,
+}: {
+  client: any;
+  model: string;
+  targetType: MemoryTargetType;
+  targetId: string;
+  content: string;
+}) {
+  const messages = [
+    { role: "system", content: "You consolidate local memory. Return only valid JSON. Do not add new facts." },
+    {
+      role: "user",
+      content: [
+        memoryConsolidatePromptCache,
+        "",
+        `[TARGET] ${targetType} :: ${targetId}`,
+        "",
+        "[CURRENT MEMORY MARKDOWN]",
+        content.slice(0, 22000),
+      ].join("\n"),
+    },
+  ];
+
+  const completion = await createJsonCompletion(client, model, messages, 1800);
+  const raw = parseJsonObject((completion.choices[0].message as any).content || "");
+  return validateConsolidationProposal(raw, targetType);
+}
+
+let memoryConsolidatePromptCache = "Return JSON that consolidates the provided memory item without adding new facts.";
+
+async function writePendingConsolidation({
+  report,
+  targetType,
+  targetId,
+  runtime,
+  proposal,
+  beforeContent,
+}: {
+  report: StoredReport;
+  targetType: MemoryTargetType;
+  targetId: string;
+  runtime: string;
+  proposal: MemoryConsolidationProposal;
+  beforeContent: string;
+}) {
+  await ensureMemoryDirs();
+  const fileName = pendingConsolidationFileName(targetType, targetId);
+  if (!fileName) throw new Error("Invalid pending consolidation target.");
+
+  const proposedAt = new Date().toISOString();
+  const record = {
+    action: "pending_consolidation",
+    targetType,
+    targetId,
+    proposedAt,
+    runtime,
+    status: "pending",
+    sourceReportId: report.id,
+    sourceReportType: report.type,
+    sourceReportDate: report.date,
+    current: {
+      lastUpdated: parseMemorySummary(beforeContent).lastUpdated,
+      sections: consolidationSections(targetType, beforeContent),
+      fullContent: beforeContent,
+    },
+    proposal,
+  };
+
+  await fs.writeFile(path.join(MEMORY_PENDING_CONSOLIDATIONS_DIR, fileName), JSON.stringify(record, null, 2), "utf8");
+  return fileName;
+}
+
+async function writePendingConsolidationsForUpdates({
+  report,
+  updates,
+  memories,
+  client,
+  model,
+  runtime,
+}: {
+  report: StoredReport;
+  updates: MemoryPatchUpdate[];
+  memories: MemoryFile[];
+  client: any;
+  model: string;
+  runtime: string;
+}) {
+  const uniqueTargets = [...new Map(
+    updates.map((update) => [`${update.targetType}:${update.targetId}`, update])
+  ).values()].slice(0, 6);
+  const written: PendingConsolidationResult[] = [];
+
+  for (const update of uniqueTargets) {
+    const memory = memories.find((item) => item.kind === update.targetType && item.name === update.targetId);
+    if (!memory) continue;
+
+    try {
+      const content = await fs.readFile(memory.path, "utf8");
+      const proposal = await proposeMemoryConsolidationForTarget({
+        client,
+        model,
+        targetType: update.targetType,
+        targetId: update.targetId,
+        content,
+      });
+      const fileName = await writePendingConsolidation({
+        report,
+        targetType: update.targetType,
+        targetId: update.targetId,
+        runtime,
+        proposal,
+        beforeContent: content,
+      });
+      written.push({ targetType: update.targetType, targetId: update.targetId, fileName });
+    } catch (error) {
+      console.warn(`Auto consolidation skipped for ${update.targetType}:${update.targetId}. ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  return written;
+}
+
+async function writeConsolidationRecord({
+  targetType,
+  targetId,
+  runtime,
+  proposal,
+  beforeContent,
+  afterContent,
+}: {
+  targetType: MemoryTargetType;
+  targetId: string;
+  runtime: string;
+  proposal: MemoryConsolidationProposal;
+  beforeContent: string;
+  afterContent: string;
+}) {
+  await ensureMemoryDirs();
+  const appliedAt = new Date().toISOString();
+  const stamp = formatInTimeZone(new Date(appliedAt), LA_TZ, "yyyy-MM-dd'T'HH-mm-ss");
+  const fileName = `${stamp}-consolidate-${targetId}.json`;
+  const record = {
+    action: "consolidate",
+    targetType,
+    targetId,
+    appliedAt,
+    runtime,
+    status: "applied",
+    before: {
+      lastUpdated: parseMemorySummary(beforeContent).lastUpdated,
+      sections: consolidationSections(targetType, beforeContent),
+      fullContent: beforeContent,
+    },
+    after: {
+      lastUpdated: parseMemorySummary(afterContent).lastUpdated,
+      sections: consolidationSections(targetType, afterContent),
+      fullContent: afterContent,
+    },
+    proposal,
+  };
+  await fs.writeFile(path.join(MEMORY_CONSOLIDATIONS_DIR, fileName), JSON.stringify(record, null, 2), "utf8");
+  return fileName;
+}
+
 async function startServer() {
   const app = express();
   const PORT = 3000;
@@ -799,6 +1105,10 @@ async function startServer() {
   const memoryPatchPrompt = await fs
     .readFile(MEMORY_PATCH_PROMPT_PATH, "utf8")
     .catch(() => "Return JSON memory patches from the report.");
+  const memoryConsolidatePrompt = await fs
+    .readFile(MEMORY_CONSOLIDATE_PROMPT_PATH, "utf8")
+    .catch(() => "Return JSON that consolidates the provided memory item without adding new facts.");
+  memoryConsolidatePromptCache = memoryConsolidatePrompt;
 
   app.use(express.json({ limit: "5mb" }));
 
@@ -838,6 +1148,8 @@ async function startServer() {
       const drafts = await readJsonFiles(MEMORY_DRAFTS_DIR);
       const promotedReviews = await readJsonFiles(MEMORY_PROMOTED_DIR);
       const dismissedReviews = await readJsonFiles(MEMORY_DISMISSED_DIR);
+      const consolidationReviews = await readJsonFiles(MEMORY_CONSOLIDATIONS_DIR);
+      const pendingConsolidations = await readJsonFiles(MEMORY_PENDING_CONSOLIDATIONS_DIR);
       const reviewTrail = [...promotedReviews, ...dismissedReviews]
         .sort((a, b) => b.timestamp - a.timestamp)
         .slice(0, 40);
@@ -854,6 +1166,8 @@ async function startServer() {
         events: events.slice(0, 40).map((event) => ({ fileName: event.name, ...event.data })),
         drafts: drafts.slice(0, 40).map((draft) => ({ fileName: draft.name, ...draft.data })),
         reviewTrail: reviewTrail.map((review) => ({ fileName: review.name, ...review.data })),
+        consolidationTrail: consolidationReviews.slice(0, 40).map((review) => ({ fileName: review.name, ...review.data })),
+        pendingConsolidations: pendingConsolidations.slice(0, 40).map((review) => ({ fileName: review.name, ...review.data })),
       });
     } catch (error: any) {
       console.error("Memory Read Error:", error);
@@ -876,6 +1190,191 @@ async function startServer() {
     } catch (error: any) {
       console.error("Memory Draft Action Error:", error);
       res.status(500).json({ error: error.message || "Failed to apply draft action." });
+    }
+  });
+
+  app.post("/api/memory/consolidate", async (req, res) => {
+    try {
+      const targetType = req.body?.targetType === "narrative" ? "narrative" : req.body?.targetType === "story" ? "story" : null;
+      const targetId = truncateText(req.body?.targetId, 120);
+      const runtime = normalizeRuntime(req.body?.runtime);
+      if (!targetType || !targetId) {
+        res.status(400).json({ error: "Invalid consolidation target." });
+        return;
+      }
+
+      const targetPath = memoryPathForTarget(targetType, targetId);
+      if (!targetPath) {
+        res.status(400).json({ error: "Invalid target id." });
+        return;
+      }
+
+      const content = await fs.readFile(targetPath, "utf8");
+      const { client, config } = getLlmClient(runtime);
+      const started = Date.now();
+      const messagesForEstimate = [
+        memoryConsolidatePrompt,
+        "",
+        `[TARGET] ${targetType} :: ${targetId}`,
+        "",
+        "[CURRENT MEMORY MARKDOWN]",
+        content.slice(0, 22000),
+      ].join("\n");
+      const completion = await createJsonCompletion(client, config.model, [
+        { role: "system", content: "You consolidate local memory. Return only valid JSON. Do not add new facts." },
+        { role: "user", content: messagesForEstimate },
+      ], 1800);
+      const raw = parseJsonObject((completion.choices[0].message as any).content || "");
+      const proposal = validateConsolidationProposal(raw, targetType);
+      const usage = completionUsageMetrics(completion);
+
+      res.json({
+        targetType,
+        targetId,
+        current: {
+          lastUpdated: parseMemorySummary(content).lastUpdated,
+          sections: consolidationSections(targetType, content),
+        },
+        proposal,
+        metrics: {
+          responseMs: Date.now() - started,
+          promptTokens: usage.promptTokens,
+          completionTokens: usage.completionTokens,
+          totalTokens: usage.totalTokens,
+          estimatedInputTokens: estimateTokens(messagesForEstimate),
+          estimatedOutputTokens: estimateTokens(JSON.stringify(proposal)),
+        },
+      });
+    } catch (error: any) {
+      console.error("Memory Consolidation Error:", error);
+      res.status(500).json({ error: error.message || "Failed to consolidate memory." });
+    }
+  });
+
+  app.post("/api/memory/consolidate/apply", async (req, res) => {
+    try {
+      const targetType = req.body?.targetType === "narrative" ? "narrative" : req.body?.targetType === "story" ? "story" : null;
+      const targetId = truncateText(req.body?.targetId, 120);
+      const runtime = String(req.body?.runtime || "unknown");
+      if (!targetType || !targetId || !req.body?.proposal) {
+        res.status(400).json({ error: "Invalid consolidation apply payload." });
+        return;
+      }
+
+      const targetPath = memoryPathForTarget(targetType, targetId);
+      if (!targetPath) {
+        res.status(400).json({ error: "Invalid target id." });
+        return;
+      }
+
+      const proposal = validateConsolidationProposal(req.body.proposal, targetType);
+      const beforeContent = await fs.readFile(targetPath, "utf8");
+      const afterContent = applyConsolidationToContent(beforeContent, targetType, proposal);
+      await fs.writeFile(targetPath, afterContent, "utf8");
+      const reviewRecord = await writeConsolidationRecord({
+        targetType,
+        targetId,
+        runtime,
+        proposal,
+        beforeContent,
+        afterContent,
+      });
+
+      res.json({ ok: true, targetType, targetId, reviewRecord });
+    } catch (error: any) {
+      console.error("Memory Consolidation Apply Error:", error);
+      res.status(500).json({ error: error.message || "Failed to apply consolidation." });
+    }
+  });
+
+  app.post("/api/memory/consolidate/pending/action", async (req, res) => {
+    try {
+      const fileName = safeMemoryJsonName(req.body?.fileName);
+      const action = req.body?.action === "apply" ? "apply" : req.body?.action === "dismiss" ? "dismiss" : null;
+      if (!fileName || !action) {
+        res.status(400).json({ error: "Invalid pending consolidation action." });
+        return;
+      }
+
+      const pendingPath = path.join(MEMORY_PENDING_CONSOLIDATIONS_DIR, fileName);
+      const pending = JSON.parse(await fs.readFile(pendingPath, "utf8"));
+      const targetType = pending.targetType === "narrative" ? "narrative" : pending.targetType === "story" ? "story" : null;
+      const targetId = truncateText(pending.targetId, 120);
+      if (!targetType || !targetId) {
+        res.status(400).json({ error: "Invalid pending consolidation target." });
+        return;
+      }
+
+      if (action === "dismiss") {
+        await fs.unlink(pendingPath);
+        res.json({ ok: true, action, targetType, targetId });
+        return;
+      }
+
+      const targetPath = memoryPathForTarget(targetType, targetId);
+      if (!targetPath) {
+        res.status(400).json({ error: "Invalid pending consolidation target id." });
+        return;
+      }
+
+      const beforeContent = await fs.readFile(targetPath, "utf8");
+      const proposal = validateConsolidationProposal(pending.proposal, targetType);
+      const afterContent = applyConsolidationToContent(beforeContent, targetType, proposal);
+      await fs.writeFile(targetPath, afterContent, "utf8");
+      const reviewRecord = await writeConsolidationRecord({
+        targetType,
+        targetId,
+        runtime: String(pending.runtime || "unknown"),
+        proposal,
+        beforeContent,
+        afterContent,
+      });
+      await fs.unlink(pendingPath);
+      res.json({ ok: true, action, targetType, targetId, reviewRecord });
+    } catch (error: any) {
+      console.error("Pending Consolidation Action Error:", error);
+      res.status(500).json({ error: error.message || "Failed to apply pending consolidation." });
+    }
+  });
+
+  app.post("/api/memory/consolidate/rollback", async (req, res) => {
+    try {
+      const safeName = safeMemoryJsonName(req.body?.reviewFileName);
+      if (!safeName) {
+        res.status(400).json({ error: "Invalid consolidation review file name." });
+        return;
+      }
+
+      const reviewPath = path.join(MEMORY_CONSOLIDATIONS_DIR, safeName);
+      const record = JSON.parse(await fs.readFile(reviewPath, "utf8"));
+      if (record?.status !== "applied" || !record?.before?.fullContent) {
+        res.status(400).json({ error: "Consolidation is not rollbackable." });
+        return;
+      }
+
+      const targetType = record.targetType === "narrative" ? "narrative" : record.targetType === "story" ? "story" : null;
+      const targetId = truncateText(record.targetId, 120);
+      if (!targetType || !targetId) {
+        res.status(400).json({ error: "Invalid rollback target." });
+        return;
+      }
+      const targetPath = memoryPathForTarget(targetType, targetId);
+      if (!targetPath) {
+        res.status(400).json({ error: "Invalid rollback target id." });
+        return;
+      }
+
+      await fs.writeFile(targetPath, String(record.before.fullContent).trimEnd() + "\n", "utf8");
+      const nextRecord = {
+        ...record,
+        status: "rolled_back",
+        rolledBackAt: new Date().toISOString(),
+      };
+      await fs.writeFile(reviewPath, JSON.stringify(nextRecord, null, 2), "utf8");
+      res.json({ ok: true, targetType, targetId, reviewRecord: safeName });
+    } catch (error: any) {
+      console.error("Memory Consolidation Rollback Error:", error);
+      res.status(500).json({ error: error.message || "Failed to rollback consolidation." });
     }
   });
 
@@ -1019,10 +1518,21 @@ async function startServer() {
       const event = draftOnly ? null : await writeMemoryEvent(report, patch.updates, patch.newCandidates);
       const drafts = await writeMemoryDrafts(report, patch.newCandidates);
       const written = draftOnly ? [] : await applyMemoryUpdates(report, patch.updates, existingMemories);
+      const pendingConsolidations = draftOnly || patch.updates.length === 0
+        ? []
+        : await writePendingConsolidationsForUpdates({
+          report,
+          updates: patch.updates,
+          memories: existingMemories,
+          client,
+          model: config.model,
+          runtime,
+        });
       res.json({
         event,
         drafts,
         updates: written,
+        pendingConsolidations,
         newCandidates: patch.newCandidates,
         skippedOfficialUpdates: draftOnly,
         reason: draftOnly ? "market_draft_review" : undefined,

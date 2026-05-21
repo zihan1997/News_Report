@@ -5,6 +5,7 @@ const root = process.cwd();
 const memoryRoot = path.join(root, "memory");
 const storiesDir = path.join(memoryRoot, "stories");
 const narrativesDir = path.join(memoryRoot, "narratives");
+const consolidationsDir = path.join(memoryRoot, "review", "consolidations");
 
 const STORY_HEADINGS = [
   "Current State",
@@ -107,6 +108,22 @@ for (const item of [...stories, ...narratives]) {
   const latestReport = latestReportTimestamp(item.content);
   if (parsedUpdated && latestReport && parsedUpdated + 60_000 < latestReport) {
     issues.push(`${item.name}: Last Updated is older than latest source report`);
+  }
+}
+
+if (fs.existsSync(consolidationsDir)) {
+  for (const name of fs.readdirSync(consolidationsDir).filter((file) => file.endsWith(".json"))) {
+    const filePath = path.join(consolidationsDir, name);
+    try {
+      const record = JSON.parse(fs.readFileSync(filePath, "utf8"));
+      if (record.action !== "consolidate") issues.push(`${name}: consolidation action must be "consolidate"`);
+      if (!["story", "narrative"].includes(record.targetType)) issues.push(`${name}: invalid targetType`);
+      if (!record.targetId) issues.push(`${name}: missing targetId`);
+      if (!["applied", "rolled_back"].includes(record.status)) issues.push(`${name}: invalid consolidation status`);
+      if (!record.before?.fullContent || !record.after?.fullContent) issues.push(`${name}: missing rollback fullContent`);
+    } catch (error) {
+      issues.push(`${name}: invalid consolidation JSON (${error.message})`);
+    }
   }
 }
 

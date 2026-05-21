@@ -36,6 +36,10 @@ Story vs narrative separation:
 New candidate rules:
 - Use newCandidates only when the report introduces a high-value story or narrative that clearly does not fit existing targets.
 - New candidates are drafts only; they will not become official memory automatically.
+- Do not create newCandidates just to keep the draft queue active.
+- Prefer an update over a newCandidate when a topic can be cleanly represented as evidence for an existing target.
+- Create a newCandidate only when the report introduces a durable topic that would be distorted, hidden, or made too vague if forced into an existing broad story/narrative.
+- If the topic only loosely fits an existing broad narrative and appears likely to recur, create at most one newCandidate rather than forcing the update.
 - Keep at most 2 newCandidates.
 
 JSON shape:

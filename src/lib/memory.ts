@@ -8,6 +8,11 @@ type MemoryUpdateResponse = {
   event: string | null;
   drafts: string | null;
   updates: string[];
+  pendingConsolidations?: Array<{
+    targetType: "story" | "narrative";
+    targetId: string;
+    fileName: string;
+  }>;
   newCandidates: unknown[];
   skipped?: boolean;
   skippedOfficialUpdates?: boolean;
@@ -83,12 +88,82 @@ export type MemoryDraftReview = {
   promoted: { targetType: "story" | "narrative"; targetId: string } | null;
 };
 
+export type MemoryConsolidationProposal = {
+  currentState?: string;
+  resolved?: string[];
+  openGaps?: string[];
+  weakSignals?: string[];
+  openQuestions?: string[];
+  watchlist?: string[];
+};
+
+export type MemoryConsolidationReview = {
+  fileName: string;
+  action: "consolidate";
+  targetType: "story" | "narrative";
+  targetId: string;
+  appliedAt: string;
+  rolledBackAt?: string;
+  runtime: string;
+  status: "applied" | "rolled_back";
+  before: {
+    lastUpdated: string;
+    sections: Record<string, string>;
+    fullContent: string;
+  };
+  after: {
+    lastUpdated: string;
+    sections: Record<string, string>;
+    fullContent: string;
+  };
+  proposal: MemoryConsolidationProposal;
+};
+
+export type MemoryPendingConsolidation = {
+  fileName: string;
+  action: "pending_consolidation";
+  targetType: "story" | "narrative";
+  targetId: string;
+  proposedAt: string;
+  runtime: string;
+  status: "pending";
+  sourceReportId: string;
+  sourceReportType: "morning" | "evening" | "market";
+  sourceReportDate: string;
+  current: {
+    lastUpdated: string;
+    sections: Record<string, string>;
+    fullContent: string;
+  };
+  proposal: MemoryConsolidationProposal;
+};
+
+export type MemoryConsolidationResponse = {
+  targetType: "story" | "narrative";
+  targetId: string;
+  current: {
+    lastUpdated: string;
+    sections: Record<string, string>;
+  };
+  proposal: MemoryConsolidationProposal;
+  metrics?: {
+    responseMs?: number;
+    promptTokens?: number | null;
+    completionTokens?: number | null;
+    totalTokens?: number | null;
+    estimatedInputTokens?: number;
+    estimatedOutputTokens?: number;
+  };
+};
+
 export type MemoryReviewResponse = {
   stories: MemoryItem[];
   narratives: MemoryItem[];
   events: MemoryEvent[];
   drafts: MemoryDraft[];
   reviewTrail: MemoryDraftReview[];
+  consolidationTrail: MemoryConsolidationReview[];
+  pendingConsolidations: MemoryPendingConsolidation[];
 };
 
 export async function getMemoryContext(query: string, limit = 6) {
@@ -149,5 +224,87 @@ export async function applyMemoryDraftAction(fileName: string, candidateIndex: n
     promoted: { targetType: "story" | "narrative"; targetId: string } | null;
     remaining: number;
     reviewRecord: string;
+  };
+}
+
+export async function proposeMemoryConsolidation(targetType: "story" | "narrative", targetId: string, runtime: LlmRuntime) {
+  const response = await fetch("/api/memory/consolidate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ targetType, targetId, runtime }),
+  });
+
+  if (!response.ok) {
+    const message = await readErrorMessage(response);
+    throw new Error(message || "Failed to propose memory consolidation.");
+  }
+
+  return await response.json() as MemoryConsolidationResponse;
+}
+
+async function readErrorMessage(response: Response) {
+  const text = await response.text();
+  if (!text) return "";
+  try {
+    const data = JSON.parse(text);
+    return data.error || text;
+  } catch {
+    return text;
+  }
+}
+
+export async function applyMemoryConsolidation(
+  targetType: "story" | "narrative",
+  targetId: string,
+  proposal: MemoryConsolidationProposal,
+  runtime: LlmRuntime
+) {
+  const response = await fetch("/api/memory/consolidate/apply", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ targetType, targetId, proposal, runtime }),
+  });
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(message || "Failed to apply memory consolidation.");
+  }
+
+  return await response.json() as { ok: boolean; targetType: "story" | "narrative"; targetId: string; reviewRecord: string };
+}
+
+export async function rollbackMemoryConsolidation(reviewFileName: string) {
+  const response = await fetch("/api/memory/consolidate/rollback", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ reviewFileName }),
+  });
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(message || "Failed to rollback memory consolidation.");
+  }
+
+  return await response.json() as { ok: boolean; targetType: "story" | "narrative"; targetId: string; reviewRecord: string };
+}
+
+export async function applyPendingMemoryConsolidation(fileName: string, action: "apply" | "dismiss") {
+  const response = await fetch("/api/memory/consolidate/pending/action", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ fileName, action }),
+  });
+
+  if (!response.ok) {
+    const message = await readErrorMessage(response);
+    throw new Error(message || "Failed to update pending memory consolidation.");
+  }
+
+  return await response.json() as {
+    ok: boolean;
+    action: "apply" | "dismiss";
+    targetType: "story" | "narrative";
+    targetId: string;
+    reviewRecord?: string;
   };
 }

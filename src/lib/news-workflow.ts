@@ -257,6 +257,14 @@ export async function verifyWithGoogleSearchIfNeeded(items: RankedNewsItem[], pr
 const PRIORITY_KEYWORDS = {
   macro: ["fed", "interest rate", "inflation", "tariff", "treasury", "recession", "jobs report", "gdp", "economic"],
   ai: ["ai", "openai", "gemini", "anthropic", "nvidia", "llm", "model", "agent", "inference", "gpu", "cuda"],
+  geopolitics: [
+    "state visit", "summit", "bilateral", "diplomacy", "foreign minister", "president meets",
+    "prime minister meets", "trade talks", "trade deal", "sanctions", "export controls",
+    "defense pact", "military aid", "ceasefire", "border dispute", "territorial dispute",
+    "energy security", "oil exports", "natural gas", "shipping lane", "strait",
+    "china", "russia", "ukraine", "taiwan", "iran", "israel", "india", "pakistan",
+    "european union", "nato", "asean", "beijing", "moscow", "washington",
+  ],
   immigration: ["uscis", "visa", "h-1b", "f-1", "opt", "cpt", "immigration", "student visa", "green card"],
   security: ["breach", "vulnerability", "cyberattack", "malware", "ransomware", "zero-day", "exploit", "hack"],
   bigTech: ["google", "microsoft", "apple", "meta", "amazon", "tesla", "nvidia", "netflix"],
@@ -399,6 +407,7 @@ export function rankNews(items: RawNewsItem[]): RankedNewsItem[] {
       if (categoryMatch) {
         if (category === 'immigration') score += 12;
         if (category === 'macro') score += 10;
+        if (category === 'geopolitics') score += 10;
         if (category === 'ai' || category === 'security') score += 8;
         if (category === 'bigTech') score += 6;
       }

@@ -27,13 +27,19 @@ import { formatInTimeZone } from "date-fns-tz";
 import { cn } from "../../../shared/lib/classnames";
 import {
   applyMemoryDraftAction,
+  applyMemoryConsolidation,
+  applyPendingMemoryConsolidation,
   getMemoryReview,
   MemoryDraft,
+  MemoryConsolidationProposal,
   MemoryDraftReview,
   MemoryEvent,
   MemoryItem,
   MemoryReviewResponse,
+  proposeMemoryConsolidation,
+  rollbackMemoryConsolidation,
 } from "../../../lib/memory";
+import { LlmRuntime } from "../../../types";
 
 const LA_TZ = "America/Los_Angeles";
 
@@ -72,7 +78,7 @@ function loadBoardLayout() {
   }
 }
 
-export function MemoryView() {
+export function MemoryView({ llmRuntime }: { llmRuntime: LlmRuntime }) {
   const [memory, setMemory] = useState<MemoryReviewResponse | null>(null);
   const [selectedId, setSelectedId] = useState("");
   const [mode, setMode] = useState<MemoryMode>("stories");
@@ -81,6 +87,12 @@ export function MemoryView() {
   const [isLoading, setIsLoading] = useState(true);
   const [refreshSpinKey, setRefreshSpinKey] = useState(0);
   const [draftActionKey, setDraftActionKey] = useState("");
+  const [consolidation, setConsolidation] = useState<{
+    targetType: "story" | "narrative";
+    targetId: string;
+    proposal: MemoryConsolidationProposal;
+  } | null>(null);
+  const [consolidationAction, setConsolidationAction] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   const loadMemory = async (animate = false) => {
@@ -122,26 +134,30 @@ export function MemoryView() {
     );
   }, [latestPropagation, mode]);
 
+  const pendingConsolidationCount = memory?.pendingConsolidations?.length || 0;
   const stats = [
     { label: "Stories", value: memory?.stories.length || 0, icon: GitBranch, color: "text-blue-500" },
     { label: "Narratives", value: memory?.narratives.length || 0, icon: Layers3, color: "text-indigo-500" },
     { label: "Events", value: memory?.events.length || 0, icon: FileClock, color: "text-emerald-500" },
     {
       label: "Candidates",
-      value: memory?.drafts.reduce((sum, draft) => sum + draft.newCandidates.length, 0) || 0,
+      value: (memory?.drafts.reduce((sum, draft) => sum + draft.newCandidates.length, 0) || 0) + pendingConsolidationCount,
       icon: Sparkles,
       color: "text-amber-500",
     },
   ];
 
   const handleBoardLayoutChange = (panel: BoardPanelId, patch: Partial<BoardPanelLayout>) => {
-    setBoardLayout((current) => ({
-      ...current,
-      [panel]: {
+    setBoardLayout((current) => {
+      const candidate = {
         ...current[panel],
         ...patch,
-      },
-    }));
+      };
+      return {
+        ...current,
+        [panel]: candidate,
+      };
+    });
   };
 
   const resetBoardLayout = () => setBoardLayout(DEFAULT_BOARD_LAYOUT);
@@ -157,6 +173,62 @@ export function MemoryView() {
       setError(err instanceof Error ? err.message : "Failed to apply draft action.");
     } finally {
       setDraftActionKey("");
+    }
+  };
+
+  const handleProposeConsolidation = async () => {
+    if (!selectedItem) return;
+    const targetType = mode === "stories" ? "story" : "narrative";
+    setConsolidationAction("propose");
+    setError(null);
+    try {
+      const response = await proposeMemoryConsolidation(targetType, selectedItem.id, llmRuntime);
+      setConsolidation({ targetType, targetId: selectedItem.id, proposal: response.proposal });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to propose consolidation.");
+    } finally {
+      setConsolidationAction("");
+    }
+  };
+
+  const handleApplyConsolidation = async () => {
+    if (!consolidation) return;
+    setConsolidationAction("apply");
+    setError(null);
+    try {
+      await applyMemoryConsolidation(consolidation.targetType, consolidation.targetId, consolidation.proposal, llmRuntime);
+      setConsolidation(null);
+      await loadMemory();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to apply consolidation.");
+    } finally {
+      setConsolidationAction("");
+    }
+  };
+
+  const handleRollbackConsolidation = async (reviewFileName: string) => {
+    setConsolidationAction(`rollback-${reviewFileName}`);
+    setError(null);
+    try {
+      await rollbackMemoryConsolidation(reviewFileName);
+      await loadMemory();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to rollback consolidation.");
+    } finally {
+      setConsolidationAction("");
+    }
+  };
+
+  const handlePendingConsolidationAction = async (fileName: string, action: "apply" | "dismiss") => {
+    setConsolidationAction(`pending-${fileName}-${action}`);
+    setError(null);
+    try {
+      await applyPendingMemoryConsolidation(fileName, action);
+      await loadMemory();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to update pending consolidation.");
+    } finally {
+      setConsolidationAction("");
     }
   };
 
@@ -250,6 +322,11 @@ export function MemoryView() {
           }}
           onSelect={setSelectedId}
           onDraftAction={handleDraftAction}
+          onConsolidate={handleProposeConsolidation}
+          onRollbackConsolidation={handleRollbackConsolidation}
+          onPendingConsolidationAction={handlePendingConsolidationAction}
+          consolidationTrail={memory?.consolidationTrail || []}
+          consolidationAction={consolidationAction}
         />
       ) : (
         <div className="memory-workbench">
@@ -280,7 +357,12 @@ export function MemoryView() {
             animate={{ opacity: 1, scale: 1 }}
             className="memory-column min-w-0"
           >
-            <MemoryDetail item={selectedItem} mode={mode} />
+            <MemoryDetail
+              item={selectedItem}
+              mode={mode}
+              onConsolidate={handleProposeConsolidation}
+              isConsolidating={consolidationAction === "propose"}
+            />
           </motion.div>
 
           <motion.div
@@ -292,11 +374,27 @@ export function MemoryView() {
               events={memory?.events || []}
               drafts={memory?.drafts || []}
               reviewTrail={memory?.reviewTrail || []}
+              consolidationTrail={memory?.consolidationTrail || []}
+              pendingConsolidations={memory?.pendingConsolidations || []}
               actionKey={draftActionKey}
+              consolidationAction={consolidationAction}
               onDraftAction={handleDraftAction}
+              onRollbackConsolidation={handleRollbackConsolidation}
+              onPendingConsolidationAction={handlePendingConsolidationAction}
             />
           </motion.div>
         </div>
+      )}
+
+      {consolidation && (
+        <ConsolidationPreview
+          proposal={consolidation.proposal}
+          targetType={consolidation.targetType}
+          targetId={consolidation.targetId}
+          isApplying={consolidationAction === "apply"}
+          onApply={handleApplyConsolidation}
+          onDismiss={() => setConsolidation(null)}
+        />
       )}
     </div>
   );
@@ -317,6 +415,11 @@ function MemoryBoard({
   onModeChange,
   onSelect,
   onDraftAction,
+  onConsolidate,
+  onRollbackConsolidation,
+  onPendingConsolidationAction,
+  consolidationTrail,
+  consolidationAction,
 }: {
   stats: Array<{ label: string; value: number; icon: any; color: string }>;
   mode: MemoryMode;
@@ -332,6 +435,11 @@ function MemoryBoard({
   onModeChange: (mode: MemoryMode) => void;
   onSelect: (id: string) => void;
   onDraftAction: (fileName: string, candidateIndex: number, action: "promote" | "dismiss") => void;
+  onConsolidate: () => void;
+  onRollbackConsolidation: (reviewFileName: string) => void;
+  onPendingConsolidationAction: (fileName: string, action: "apply" | "dismiss") => void;
+  consolidationTrail: MemoryReviewResponse["consolidationTrail"];
+  consolidationAction: string;
 }) {
   return (
     <section className="memory-board-shell">
@@ -393,7 +501,12 @@ function MemoryBoard({
           minH={460}
           onLayoutChange={onLayoutChange}
         >
-          <MemoryDetail item={selectedItem} mode={mode} />
+          <MemoryDetail
+            item={selectedItem}
+            mode={mode}
+            onConsolidate={onConsolidate}
+            isConsolidating={consolidationAction === "propose"}
+          />
         </BoardWidget>
 
         <BoardWidget
@@ -417,7 +530,14 @@ function MemoryBoard({
           minH={260}
           onLayoutChange={onLayoutChange}
         >
-          <ReviewTrailPanel reviewTrail={memory?.reviewTrail || []} />
+          <ReviewTrailPanel
+            reviewTrail={memory?.reviewTrail || []}
+            consolidationTrail={consolidationTrail}
+            pendingConsolidations={memory?.pendingConsolidations || []}
+            consolidationAction={consolidationAction}
+            onRollbackConsolidation={onRollbackConsolidation}
+            onPendingConsolidationAction={onPendingConsolidationAction}
+          />
         </BoardWidget>
 
         <BoardWidget
@@ -643,7 +763,17 @@ function MemoryIndex({
   );
 }
 
-function MemoryDetail({ item, mode }: { item: MemoryItem | null; mode: MemoryMode }) {
+function MemoryDetail({
+  item,
+  mode,
+  onConsolidate,
+  isConsolidating,
+}: {
+  item: MemoryItem | null;
+  mode: MemoryMode;
+  onConsolidate: () => void;
+  isConsolidating: boolean;
+}) {
   if (!item) {
     return (
       <section className="flex h-[70vh] flex-col items-center justify-center rounded-[2.5rem] border border-dashed border-black/10 bg-black/[0.01] p-10 text-center text-black/20">
@@ -671,6 +801,15 @@ function MemoryDetail({ item, mode }: { item: MemoryItem | null; mode: MemoryMod
             <div className="rounded-full bg-emerald-50 px-4 py-1.5">
               <span className="font-mono text-[10px] font-bold text-emerald-600">CONFIDENCE: {item.confidence}</span>
             </div>
+            <button
+              type="button"
+              onClick={onConsolidate}
+              disabled={isConsolidating}
+              className="memory-consolidate-button"
+            >
+              {isConsolidating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+              Consolidate
+            </button>
           </div>
 
           <h2 className="memory-detail-title">{item.title}</h2>
@@ -713,14 +852,24 @@ function ActivityPanel({
   events,
   drafts,
   reviewTrail,
+  consolidationTrail,
+  pendingConsolidations,
   actionKey,
+  consolidationAction,
   onDraftAction,
+  onRollbackConsolidation,
+  onPendingConsolidationAction,
 }: {
   events: MemoryEvent[];
   drafts: MemoryDraft[];
   reviewTrail: MemoryDraftReview[];
+  consolidationTrail: MemoryReviewResponse["consolidationTrail"];
+  pendingConsolidations: MemoryReviewResponse["pendingConsolidations"];
   actionKey: string;
+  consolidationAction: string;
   onDraftAction: (fileName: string, candidateIndex: number, action: "promote" | "dismiss") => void;
+  onRollbackConsolidation: (reviewFileName: string) => void;
+  onPendingConsolidationAction: (fileName: string, action: "apply" | "dismiss") => void;
 }) {
   const activityItems = useMemo(() => {
     const eventItems = events.map((event) => ({
@@ -743,7 +892,14 @@ function ActivityPanel({
   return (
     <div className="memory-activity-stack">
       <DraftCandidatesPanel drafts={drafts} actionKey={actionKey} onDraftAction={onDraftAction} />
-      <ReviewTrailPanel reviewTrail={reviewTrail} />
+      <ReviewTrailPanel
+        reviewTrail={reviewTrail}
+        consolidationTrail={consolidationTrail}
+        pendingConsolidations={pendingConsolidations}
+        consolidationAction={consolidationAction}
+        onRollbackConsolidation={onRollbackConsolidation}
+        onPendingConsolidationAction={onPendingConsolidationAction}
+      />
       <PropagationLogPanel events={events} drafts={drafts} activityItems={activityItems} />
     </div>
   );
@@ -834,23 +990,152 @@ function DraftCandidatesPanel({
   );
 }
 
-function ReviewTrailPanel({ reviewTrail }: { reviewTrail: MemoryDraftReview[] }) {
+function ReviewTrailPanel({
+  reviewTrail,
+  consolidationTrail,
+  pendingConsolidations,
+  consolidationAction,
+  onRollbackConsolidation,
+  onPendingConsolidationAction,
+}: {
+  reviewTrail: MemoryDraftReview[];
+  consolidationTrail: MemoryReviewResponse["consolidationTrail"];
+  pendingConsolidations: MemoryReviewResponse["pendingConsolidations"];
+  consolidationAction: string;
+  onRollbackConsolidation: (reviewFileName: string) => void;
+  onPendingConsolidationAction: (fileName: string, action: "apply" | "dismiss") => void;
+}) {
   const [openReview, setOpenReview] = useState("");
+  const [isCollapsed, setIsCollapsed] = useState(false);
+  const pendingItems = pendingConsolidations || [];
+  const appliedItems = consolidationTrail || [];
+  const reviewItems = reviewTrail || [];
 
   return (
-    <section className="memory-review-panel">
-      <div className="mb-5 flex items-center justify-between px-1">
+    <section className={cn("memory-review-panel", isCollapsed && "memory-review-panel-collapsed")}>
+      <button
+        type="button"
+        onClick={() => setIsCollapsed((current) => !current)}
+        className="memory-review-header"
+        aria-expanded={!isCollapsed}
+      >
         <div className="flex items-center gap-3">
           <div className="rounded-xl bg-black/[0.03] p-2">
             <CheckCircle2 className="h-4 w-4 text-black/40" />
           </div>
-          <h3 className="text-[10px] font-bold uppercase tracking-[0.2em] text-black/40">Review Trail</h3>
+          <div className="text-left">
+            <h3 className="text-[10px] font-bold uppercase tracking-[0.2em] text-black/40">Review Trail</h3>
+            {isCollapsed && (
+              <p className="mt-1 font-mono text-[9px] font-bold uppercase tracking-widest text-black/25">Tap to expand</p>
+            )}
+          </div>
         </div>
-        <span className="font-mono text-[10px] font-bold text-black/25">{reviewTrail.length} Decisions</span>
-      </div>
+        <div className="flex items-center gap-3">
+          <span className="font-mono text-[10px] font-bold text-black/25">
+            {pendingItems.length} Pending / {reviewItems.length + appliedItems.length} Decisions
+          </span>
+          <ChevronRight className={cn("h-4 w-4 text-black/30 transition-transform", !isCollapsed && "rotate-90")} />
+        </div>
+      </button>
+
+      {isCollapsed ? null : (
 
       <div className="space-y-3">
-        {reviewTrail.slice(0, 6).map((review) => (
+        {pendingItems.map((pending) => (
+          <button
+            key={pending.fileName}
+            type="button"
+            onClick={() => setOpenReview((current) => current === pending.fileName ? "" : pending.fileName)}
+            className="memory-review-card memory-review-card-pending"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="mb-1 flex items-center gap-2">
+                  <span className="memory-review-badge memory-review-badge-pending">Pending</span>
+                  <span className="font-mono text-[9px] font-bold uppercase tracking-widest text-black/25">{pending.targetType}</span>
+                </div>
+                <div className="line-clamp-2 font-serif text-base font-bold leading-tight text-black">{pending.targetId}</div>
+              </div>
+              <span className="shrink-0 font-mono text-[9px] font-bold text-black/25">
+                {formatInTimeZone(new Date(pending.proposedAt), LA_TZ, "MM-dd HH:mm")}
+              </span>
+            </div>
+            {openReview === pending.fileName && (
+              <div className="mt-3 border-t border-black/5 pt-3 text-left">
+                <p className="text-xs leading-relaxed text-black/55">{pending.proposal.currentState}</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    disabled={Boolean(consolidationAction)}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onPendingConsolidationAction(pending.fileName, "apply");
+                    }}
+                    className="inline-flex items-center gap-2 rounded-full bg-black px-3 py-2 font-mono text-[9px] font-bold uppercase tracking-widest text-white disabled:opacity-50"
+                  >
+                    {consolidationAction === `pending-${pending.fileName}-apply` ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+                    Apply
+                  </button>
+                  <button
+                    type="button"
+                    disabled={Boolean(consolidationAction)}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onPendingConsolidationAction(pending.fileName, "dismiss");
+                    }}
+                    className="inline-flex items-center gap-2 rounded-full bg-black/5 px-3 py-2 font-mono text-[9px] font-bold uppercase tracking-widest text-black/45 disabled:opacity-50"
+                  >
+                    {consolidationAction === `pending-${pending.fileName}-dismiss` ? <Loader2 className="h-3 w-3 animate-spin" /> : <EyeOff className="h-3 w-3" />}
+                    Dismiss
+                  </button>
+                </div>
+              </div>
+            )}
+          </button>
+        ))}
+        {appliedItems.slice(0, 6).map((review) => (
+          <button
+            key={review.fileName}
+            type="button"
+            onClick={() => setOpenReview((current) => current === review.fileName ? "" : review.fileName)}
+            className="memory-review-card"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="mb-1 flex items-center gap-2">
+                  <span className={cn("memory-review-badge", review.status === "rolled_back" ? "memory-review-badge-dismiss" : "memory-review-badge-promote")}>
+                    {review.status === "rolled_back" ? "Rolled Back" : "Consolidated"}
+                  </span>
+                  <span className="font-mono text-[9px] font-bold uppercase tracking-widest text-black/25">{review.targetType}</span>
+                </div>
+                <div className="line-clamp-2 font-serif text-base font-bold leading-tight text-black">{review.targetId}</div>
+              </div>
+              <span className="shrink-0 font-mono text-[9px] font-bold text-black/25">
+                {formatInTimeZone(new Date(review.appliedAt), LA_TZ, "MM-dd HH:mm")}
+              </span>
+            </div>
+            {openReview === review.fileName && (
+              <div className="mt-3 border-t border-black/5 pt-3 text-left">
+                <p className="text-xs leading-relaxed text-black/55">{review.proposal.currentState}</p>
+                {review.status === "applied" && (
+                  <button
+                    type="button"
+                    disabled={Boolean(consolidationAction)}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onRollbackConsolidation(review.fileName);
+                    }}
+                    className="mt-3 inline-flex items-center gap-2 rounded-full bg-black px-3 py-2 font-mono text-[9px] font-bold uppercase tracking-widest text-white disabled:opacity-50"
+                  >
+                    {consolidationAction === `rollback-${review.fileName}` && <Loader2 className="h-3 w-3 animate-spin" />}
+                    Rollback
+                  </button>
+                )}
+              </div>
+            )}
+          </button>
+        ))}
+        {reviewItems.slice(0, 6).map((review) => (
           <button
             key={review.fileName}
             type="button"
@@ -890,8 +1175,9 @@ function ReviewTrailPanel({ reviewTrail }: { reviewTrail: MemoryDraftReview[] })
             )}
           </button>
         ))}
-        {reviewTrail.length === 0 && <EmptyMini label="No review decisions yet" />}
+        {pendingItems.length === 0 && reviewItems.length === 0 && appliedItems.length === 0 && <EmptyMini label="No review decisions yet" />}
       </div>
+      )}
     </section>
   );
 }
@@ -1023,6 +1309,85 @@ function EmptyMini({ label, dark }: { label: string; dark?: boolean }) {
       )}
     >
       {label}
+    </div>
+  );
+}
+
+function ConsolidationPreview({
+  proposal,
+  targetType,
+  targetId,
+  isApplying,
+  onApply,
+  onDismiss,
+}: {
+  proposal: MemoryConsolidationProposal;
+  targetType: "story" | "narrative";
+  targetId: string;
+  isApplying: boolean;
+  onApply: () => void;
+  onDismiss: () => void;
+}) {
+  const sections = targetType === "story"
+    ? [
+        ["Current State", proposal.currentState ? [proposal.currentState] : []],
+        ["Resolved", proposal.resolved || []],
+        ["Open Gaps", proposal.openGaps || []],
+      ]
+    : [
+        ["Current State", proposal.currentState ? [proposal.currentState] : []],
+        ["Weak Signals", proposal.weakSignals || []],
+        ["Open Questions", proposal.openQuestions || []],
+        ["Watchlist", proposal.watchlist || []],
+      ];
+
+  return (
+    <div className="memory-consolidation-overlay">
+      <motion.section
+        initial={{ opacity: 0, y: 18, scale: 0.985 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        className="memory-consolidation-modal"
+      >
+        <div className="mb-5 flex items-start justify-between gap-5">
+          <div>
+            <div className="mb-2 font-mono text-[10px] font-bold uppercase tracking-[0.22em] text-indigo-500">
+              Consolidation Proposal
+            </div>
+            <h3 className="font-serif text-3xl font-bold leading-tight text-black">{targetId}</h3>
+            <p className="mt-2 text-sm font-semibold text-black/40">{targetType} sections only. Timeline and evidence remain untouched.</p>
+          </div>
+          <button type="button" onClick={onDismiss} className="rounded-full bg-black/5 px-4 py-2 text-xs font-bold text-black/50">
+            Dismiss
+          </button>
+        </div>
+
+        <div className="memory-consolidation-sections custom-scrollbar">
+          {sections.map(([heading, values]) => (
+            <div key={heading as string} className="memory-consolidation-section">
+              <h4>{heading as string}</h4>
+              {(values as string[]).length > 0 ? (
+                <ul>
+                  {(values as string[]).map((value, index) => (
+                    <li key={`${heading}-${index}`}>{value}</li>
+                  ))}
+                </ul>
+              ) : (
+                <p>No proposed content.</p>
+              )}
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-6 flex justify-end gap-3">
+          <button type="button" onClick={onDismiss} className="memory-consolidation-action memory-consolidation-action-muted">
+            Not now
+          </button>
+          <button type="button" onClick={onApply} disabled={isApplying} className="memory-consolidation-action memory-consolidation-action-primary">
+            {isApplying ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+            Apply & Log
+          </button>
+        </div>
+      </motion.section>
     </div>
   );
 }

@@ -494,7 +494,7 @@ ${todayNews || 'No news briefings generated yet for today.'}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
             >
-              <MemoryView />
+              <MemoryView llmRuntime={llmRuntime} />
             </motion.div>
           ) : (
             <motion.div
