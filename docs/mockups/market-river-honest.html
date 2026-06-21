@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Signal Desk - Narrative River</title>
+  <style>
+    *{box-sizing:border-box} :root{--ink:#11110f;--muted:#77736c;--line:#e7e5e0;--paper:#f6f6f3;--blue:#5865f2;--orange:#ef8c37;--green:#15966d;--red:#cf625c;--purple:#8c65ca}
+    body{margin:0;background:var(--paper);color:var(--ink);font-family:Inter,"Microsoft YaHei",system-ui,sans-serif}button{font:inherit;color:inherit}.mono{font:800 10px/1.25 ui-monospace,Consolas,monospace;letter-spacing:.11em;text-transform:uppercase}
+    .topbar{height:66px;padding:0 34px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);background:#fff}.tabs,.mode{display:flex;gap:4px;padding:4px;border-radius:99px;background:#f0f0ee}.tabs span,.mode button{padding:9px 17px;border:0;border-radius:99px;background:transparent;color:#99968f}.tabs .active,.mode button.active{background:#fff;color:#111;box-shadow:0 1px 5px #0002}.brand{display:flex;align-items:center;gap:15px}.online{padding:7px 12px;border:1px solid var(--line);border-radius:99px;background:#f7f7f5;color:#99968f}.online i{display:inline-block;width:7px;height:7px;margin-right:6px;border-radius:50%;background:#16b981}.brand strong{font:700 22px/1 Georgia,serif}
+    main{max-width:1640px;margin:auto;padding:28px 34px 70px}.hero{display:grid;grid-template-columns:1fr auto;gap:30px;align-items:end;padding:16px 0 25px}.eyebrow{color:var(--blue)}h1{margin:13px 0 8px;font:700 clamp(46px,5.2vw,76px)/.92 Georgia,serif}h1 em{font-weight:400;color:#aaa7a0}.hero p{max-width:830px;margin:0;color:var(--muted);font-size:12px;line-height:1.7}.metrics{display:flex;gap:3px;padding:5px;border:1px solid var(--line);border-radius:12px;background:#fff}.metrics div{min-width:88px;padding:9px;border-radius:8px;background:#f7f7f5}.metrics span{display:block;color:#aaa7a0;font-size:8px}.metrics b{display:block;margin-top:4px;font:800 15px/1 ui-monospace,monospace}
+    .control{margin-bottom:28px;padding:20px 22px;border:1px solid var(--line);border-radius:18px;background:#fff;box-shadow:0 15px 35px #29251d0b}.control-top,.control-bottom{display:flex;justify-content:space-between;gap:24px;align-items:center}.control h2{margin:0 0 5px;font:700 25px/1 Georgia,serif}.control p{max-width:820px;margin:0;color:#77736c;font-size:11px;line-height:1.6}.control-actions{display:flex;gap:8px;align-items:center}.refresh{border:0;border-radius:11px;padding:11px 15px;background:#111;color:#fff;cursor:pointer}.control-bottom{margin-top:18px;padding-top:16px;border-top:1px solid var(--line)}.instrument{display:flex;align-items:center;gap:11px}.toggle{width:42px;height:23px;padding:2px;border:0;border-radius:99px;background:#ddd;cursor:not-allowed}.toggle i{display:block;width:19px;height:19px;border-radius:50%;background:#fff;box-shadow:0 1px 3px #0002}.locked{color:#aaa7a0}.legend{display:flex;gap:13px;flex-wrap:wrap;color:#85827b}.legend span{display:flex;gap:5px;align-items:center}.legend i{width:8px;height:8px;border-radius:50%}.legend .aligned{background:var(--blue)}.legend .diverged{background:var(--purple)}.legend .unknown{background:#aaa7a0}
+    .key-read{display:grid;grid-template-columns:auto 1fr auto;gap:14px;align-items:center;margin-top:16px;padding:13px 15px;border-radius:13px;background:#111;color:#fff}.key-read b{font:700 17px/1.25 Georgia,serif}.key-read span:last-child{color:#aaa}.river{position:relative;display:grid;gap:34px;counter-reset:river-step}.river:before{content:"";position:absolute;left:50%;top:0;bottom:0;width:1px;background:#ddd9d2}.row{position:relative;display:grid;grid-template-columns:minmax(0,5fr) 150px minmax(0,5fr);gap:21px;align-items:center;min-height:250px;counter-increment:river-step}.row:nth-child(even) .news{grid-column:3}.row:nth-child(even) .bridge{grid-column:2;grid-row:1}.row:nth-child(even) .market{grid-column:1;grid-row:1}.card{position:relative;padding:31px 21px 21px;border:1px solid var(--line);border-radius:27px;background:#fff;box-shadow:0 14px 35px #201d180a;transition:.22s}.card:before{position:absolute;top:13px;left:21px;color:#aaa7a0;font:800 8px/1 ui-monospace,monospace;letter-spacing:.13em;text-transform:uppercase}.news:before{content:"新闻提出了什么"}.market:before{content:"市场如何回应"}.card:hover{transform:translateY(-3px);border-color:#c8c5be;box-shadow:0 20px 42px #201d1814}.market{background:#fbfaf7}.card-head{display:flex;justify-content:space-between;gap:12px;align-items:center;padding-bottom:12px;border-bottom:1px solid var(--line)}.source{display:flex;gap:7px;align-items:center;color:#77736c}.source b,.asset{padding:5px 8px;border-radius:6px;background:#eef0ff;color:#5963cb}.asset{background:#111;color:#fff}.source-state{padding:5px 7px;border-radius:6px;background:#f1f1ee;color:#77736c}.card h3{margin:15px 0 8px;font:700 22px/1.08 Georgia,serif}.card p{margin:0;color:#77736c;font-size:11px;line-height:1.6}.card-foot{display:flex;justify-content:space-between;gap:10px;align-items:center;margin-top:17px;padding-top:13px;border-top:1px dotted #d8d4cc}.source-mix{display:flex;gap:4px;flex-wrap:wrap}.pill{padding:5px 7px;border-radius:5px;background:#f1f1ee;color:#77736c;font-size:8px}.pill.good{background:#eaf8f2;color:#168460}.pill.warn{background:#fff1e5;color:#ba6b2f}.pill.unknown{background:#eeeeeb;color:#8d8a83}.audit-btn{border:0;background:none;color:var(--blue);cursor:pointer}
+    .bridge{position:relative;z-index:2;display:grid;justify-items:center;text-align:center}.bridge:before{content:"0" counter(river-step) " · 当前关系";margin-bottom:8px;color:#77736c;font:800 8px/1 ui-monospace,monospace;letter-spacing:.1em;text-transform:uppercase}.clock{min-width:132px;padding:12px 14px;border:3px solid #fff;border-radius:15px;background:#111;color:#fff;box-shadow:0 7px 15px #0002}.clock span{display:block;color:#aaa;font-size:8px}.clock b{display:block;margin-top:4px;font:800 12px/1 ui-monospace,monospace}.stem{height:18px;width:2px;background:var(--purple)}.relation{max-width:145px;padding:8px 10px;border:1px solid var(--line);border-radius:99px;background:#fff;color:#77736c;font-size:9px}.relation.aligned{color:#5661c7;background:#eef0ff}.relation.unknown{color:#77736c;background:#f1f1ee}.relation.diverged{color:#7f59ae;background:#f4eefb}
+    .market-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:15px}.market-cell{padding:11px;border:1px solid var(--line);border-radius:10px;background:#fff}.market-cell span{display:block;color:#aaa7a0;font-size:8px}.market-cell b{display:block;margin-top:5px;font:800 12px/1.25 ui-monospace,monospace}.market-cell.full{grid-column:1/-1}.quotes{display:grid;grid-template-columns:repeat(4,1fr);gap:4px}.quote{padding:7px;border-radius:6px;background:#f1f2ff;color:#6269c6}.quote b{font-size:9px}.quote em{display:block;margin-top:3px;font:800 10px/1 ui-monospace,monospace;font-style:normal}.explain{margin-top:10px;padding:11px;border-radius:10px;background:#f2f2ef;color:#716e67;font-size:9px;line-height:1.55}.disabled{color:#aaa7a0;background:#f2f2ef}.disabled strong{color:#77736c}
+    .protocol{display:grid;grid-template-columns:2fr 1fr;gap:18px;margin-top:34px}.protocol>div{padding:26px;border-radius:27px}.protocol-dark{background:#111;color:#fff}.protocol-dark p{max-width:830px;color:#bbb8b1;font-size:11px;line-height:1.7}.protocol-light{border:1px solid #f0ddc9;background:#fff5e9}.protocol h3{margin:9px 0;font:700 24px/1.1 Georgia,serif}.protocol-light p{color:#786b5f;font-size:10px;line-height:1.6}
+    .backdrop{position:fixed;inset:0;z-index:20;background:#1119;display:none}.drawer{position:fixed;z-index:30;top:0;right:-620px;bottom:0;width:min(600px,100%);display:flex;flex-direction:column;background:#fff;box-shadow:-20px 0 55px #0002;transition:.3s ease}.drawer.open{right:0}.backdrop.open{display:block}.drawer-head{display:flex;justify-content:space-between;gap:20px;padding:22px;border-bottom:1px solid var(--line);background:#fafaf8}.drawer-head h2{margin:10px 0 5px;font:700 25px/1.05 Georgia,serif}.close{width:34px;height:34px;border:0;border-radius:50%;background:#eee;cursor:pointer}.drawer-body{overflow:auto;padding:22px;display:grid;gap:19px}.drawer-section{padding:16px;border:1px solid var(--line);border-radius:14px;background:#fafaf8}.drawer-section h4{margin:0 0 11px}.drawer-section p,.drawer-section li{color:#716e67;font-size:10px;line-height:1.6}.drawer-section ul{margin:0;padding-left:16px}.evidence-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.evidence-grid .drawer-section:first-child{background:#edf8f3}.evidence-grid .drawer-section:last-child{background:#fff1ee}.drawer-note{padding:12px;border:1px dashed #d5d1c9;border-radius:10px;color:#77736c;font-size:9px;line-height:1.6}
+    @media(max-width:1100px){.hero{grid-template-columns:1fr}.row{grid-template-columns:1fr}.river:before{display:none}.row .news,.row .market,.row .bridge,.row:nth-child(even) .news,.row:nth-child(even) .market,.row:nth-child(even) .bridge{grid-column:1;grid-row:auto}.protocol{grid-template-columns:1fr}.control-top,.control-bottom{align-items:flex-start;flex-direction:column}}
+  </style>
+</head>
+<body>
+  <nav class="topbar"><div class="tabs mono"><span>Intelligence</span><span class="active">Markets</span><span>Memory</span><span>History</span></div><div class="brand"><span class="online mono"><i></i>LLM Online</span><strong>Signal Desk</strong></div></nav>
+  <main>
+    <header class="hero"><div><span class="eyebrow mono">Narrative River · Market Relationship Observatory</span><h1>叙事如何流动，<br><em>市场如何回应。</em></h1><p>将新闻证据与真实市场反馈放在同一条时间中轴两侧。系统只记录可以观测的对齐、背离与缺口，不把时间相邻包装成因果关系。</p></div><div class="metrics"><div><span class="mono">News evidence</span><b>04</b></div><div><span class="mono">Market scans</span><b>03</b></div><div><span class="mono">Open gaps</span><b>05</b></div></div></header>
+
+    <section class="control">
+      <div class="control-top"><div><h2>Market Intelligence River</h2><p><b>阅读顺序：</b>先看中间的“当前关系”，再向左查看新闻提出的解释，最后向右检查市场是否像这个解释成立。</p><div class="key-read"><span class="mono">Today’s key relationship</span><b>AI 利好仍在，但市场正在对不同商业路径进行差异化定价。</b><span class="mono">Start here ↓</span></div></div><div class="control-actions"><div class="mode mono"><button class="active">真实扫描时间线</button><button>演示场景</button></div><button class="refresh mono">↻ 研判大市</button></div></div>
+      <div class="control-bottom"><div class="instrument"><button class="toggle" title="需要历史价格数据" disabled><i></i></button><div><span class="mono locked">Beta Mask · Locked</span><p>需要历史价格序列与基准回归后才能启用；当前不生成伪残差。</p></div></div><div class="legend mono"><span><i class="aligned"></i>方向部分对齐</span><span><i class="diverged"></i>方向背离</span><span><i class="unknown"></i>关系未知</span></div></div>
+    </section>
+
+    <section class="river">
+      <article class="row">
+        <div class="card news">
+          <div class="card-head"><div class="source mono"><b>Analysis</b><span>CNBC · 1 reported source</span></div><span class="source-state mono">source structure visible</span></div>
+          <h3>OpenAI 聚焦企业市场，Apple 与 Google 瞄准消费端 AI</h3>
+          <p>商业化问题从“谁的模型更强”转向“谁能在不同市场形成付费路径”。这是一条战略分化信号，还不是商业成功的证明。</p>
+          <div class="card-foot"><div class="source-mix mono"><span class="pill good">报道已确认</span><span class="pill unknown">硬数据缺失</span></div><button class="audit-btn mono" data-audit="commercialization">◎ 审计完整证据链</button></div>
+        </div>
+        <div class="bridge"><div class="clock"><span class="mono">2026-06-11</span><b>08:46 LA</b></div><i class="stem"></i><span class="relation aligned mono">部分方向对齐</span></div>
+        <div class="card market">
+          <div class="card-head"><div class="source"><b class="asset mono">AAPL · GOOGL · MSFT</b><span class="mono">市场对应标的</span></div><span class="source-state mono">mixed response</span></div>
+          <div class="market-grid"><div class="market-cell"><span class="mono">可观测窗口</span><b>新闻后最新交易价格</b></div><div class="market-cell"><span class="mono">当前判断</span><b>板块内部差异化定价</b></div><div class="market-cell full"><div class="quotes"><div class="quote"><b>AAPL</b><em>+0.55%</em></div><div class="quote"><b>GOOGL</b><em>-2.68%</em></div><div class="quote"><b>MSFT</b><em>-3.24%</em></div><div class="quote"><b>AMD</b><em>+1.40%</em></div></div></div></div>
+          <div class="explain"><b>观察：</b>消费端与企业端相关公司价格方向分裂，不能用这一条新闻解释全部波动。</div>
+        </div>
+      </article>
+
+      <article class="row">
+        <div class="card news">
+          <div class="card-head"><div class="source mono"><b>Wire</b><span>CNBC + market report</span></div><span class="source-state mono">headline revised</span></div>
+          <h3>美国与伊朗冲突叙事从升级转向可能缓和</h3>
+          <p>早间仍是军事升级判断；晚间 Trump 宣布框架协议，油价应声下跌，但伊朗官方尚未确认。新闻本身正在快速改写。</p>
+          <div class="card-foot"><div class="source-mix mono"><span class="pill good">晚间新增</span><span class="pill warn">单方声明</span></div><button class="audit-btn mono" data-audit="iran">◎ 审计完整证据链</button></div>
+        </div>
+        <div class="bridge"><div class="clock"><span class="mono">2026-06-11</span><b>18:10 LA</b></div><i class="stem"></i><span class="relation aligned mono">市场用于校准</span></div>
+        <div class="card market">
+          <div class="card-head"><div class="source"><b class="asset mono">OIL · TSLA</b><span class="mono">市场对应标的</span></div><span class="source-state mono">coverage incomplete</span></div>
+          <div class="market-grid"><div class="market-cell"><span class="mono">直接反馈</span><b>报道记录油价下跌</b></div><div class="market-cell"><span class="mono">间接标的</span><b>TSLA +0.69%</b></div><div class="market-cell full disabled"><span class="mono">不能回答</span><strong>当前行情覆盖没有能源股票，无法完整验证地缘风险定价。</strong></div></div>
+          <div class="explain"><b>观察：</b>油价反馈削弱了早间“持续升级”判断；这是一种校准，不是协议已经落地的证明。</div>
+        </div>
+      </article>
+
+      <article class="row">
+        <div class="card news">
+          <div class="card-head"><div class="source mono"><b>Media</b><span>The Hacker News + TechCrunch</span></div><span class="source-state mono">2 reports</span></div>
+          <h3>Oracle PeopleSoft 零日漏洞影响超过 100 家企业</h3>
+          <p>该事件增强了企业攻击面持续扩大的主线，但两个媒体报道是否包含独立调查仍需要进一步检查。</p>
+          <div class="card-foot"><div class="source-mix mono"><span class="pill good">事件已报道</span><span class="pill unknown">独立性待查</span></div><button class="audit-btn mono" data-audit="security">◎ 审计完整证据链</button></div>
+        </div>
+        <div class="bridge"><div class="clock"><span class="mono">2026-06-11</span><b>Evening</b></div><i class="stem"></i><span class="relation unknown mono">关系未知</span></div>
+        <div class="card market">
+          <div class="card-head"><div class="source"><b class="asset mono">CYBER BASKET</b><span class="mono">市场对应标的</span></div><span class="source-state mono">not covered</span></div>
+          <div class="market-grid"><div class="market-cell full disabled"><span class="mono">No observable market link</span><strong>当前扫描没有覆盖网络安全观察篮子。</strong></div><div class="market-cell"><span class="mono">系统没有说</span><b>“市场忽略了新闻”</b></div><div class="market-cell"><span class="mono">系统只能够说</span><b>“我们没有观测数据”</b></div></div>
+          <div class="explain"><b>观察：</b>没有看到反应，与市场没有反应，不是同一件事。</div>
+        </div>
+      </article>
+
+      <article class="row">
+        <div class="card news">
+          <div class="card-head"><div class="source mono"><b>News chain</b><span>AI infrastructure contracts</span></div><span class="source-state mono">multi-report theme</span></div>
+          <h3>AI 基础设施需求持续获得订单与建设信号</h3>
+          <p>SpaceX-Google、Corning-Amazon 与 Meta-Reliance 等报道共同强化建设需求，但需求强劲不自动意味着当前估值合理。</p>
+          <div class="card-foot"><div class="source-mix mono"><span class="pill good">多条报告</span><span class="pill warn">合同细节待核</span></div><button class="audit-btn mono" data-audit="infrastructure">◎ 审计完整证据链</button></div>
+        </div>
+        <div class="bridge"><div class="clock"><span class="mono">2026-06-10</span><b>Close</b></div><i class="stem"></i><span class="relation diverged mono">方向背离</span></div>
+        <div class="card market">
+          <div class="card-head"><div class="source"><b class="asset mono">NVDA · AMD · META</b><span class="mono">市场对应标的</span></div><span class="source-state mono">daily close only</span></div>
+          <div class="market-grid"><div class="market-cell"><span class="mono">新闻方向</span><b>需求主线增强</b></div><div class="market-cell"><span class="mono">市场方向</span><b>相关标的回撤</b></div><div class="market-cell full"><div class="quotes"><div class="quote"><b>NVDA</b><em>-3.73%</em></div><div class="quote"><b>AMD</b><em>-4.86%</em></div><div class="quote"><b>META</b><em>-2.33%</em></div><div class="quote"><b>QQQ</b><em>-2.00%</em></div></div></div></div>
+          <div class="explain"><b>观察：</b>短期价格与积极叙事背离。没有历史序列与成交量时，不判断“提前定价”或具体驱动比例。</div>
+        </div>
+      </article>
+    </section>
+
+    <section class="protocol"><div class="protocol-dark"><span class="mono">Observational Protocol</span><h3>市场关系不是一个答案，而是一组可以继续验证的问题。</h3><p>先确认新闻来源与内容，再观察相关标的是否出现方向一致、方向背离或没有覆盖。只有在具备事件时间、历史价格、成交量和基准数据之后，系统才尝试计算提前反应、延迟反应或 Beta 残差。</p></div><div class="protocol-light"><span class="mono">Guardrail</span><h3>不要把漂亮的图，误认为证据。</h3><p>本页不会生成来源独立性分数、事件贡献百分比或虚构的 60 日回归结果。缺失的数据会直接显示为缺口。</p></div></section>
+  </main>
+
+  <div class="backdrop" id="backdrop"></div>
+  <aside class="drawer" id="drawer"><div class="drawer-head"><div><span class="mono" id="drawer-kind">Evidence audit</span><h2 id="drawer-title"></h2><p class="mono" id="drawer-time"></p></div><button class="close" id="close">×</button></div><div class="drawer-body"><div class="drawer-section"><h4 class="mono">Source composition</h4><p id="drawer-source"></p></div><div class="evidence-grid"><div class="drawer-section"><h4 class="mono">Supporting evidence</h4><ul id="support"></ul></div><div class="drawer-section"><h4 class="mono">Opposing / friction</h4><ul id="oppose"></ul></div></div><div class="drawer-section"><h4 class="mono">Missing gaps</h4><ul id="gaps"></ul></div><div class="drawer-note">审计抽屉不提供无法复核的置信度百分比。它展示来源结构、支持证据、反方证据和当前缺口。</div></div></aside>
+  <script>
+    const audits={
+      commercialization:{title:"AI 商业化路径分化",time:"2026-06-11 · Morning report",source:"当前主张主要来自一篇 CNBC 分析报道，并与一份市场扫描中的相关股票表现对照。来源结构有限，尚无公司财报或采用率数据。",support:["报道确认 OpenAI、Apple 与 Google 采取不同市场路径。","市场扫描显示相关公司价格表现分化。"],oppose:["战略定位不同，不代表任何一方已经形成商业优势。","股票价格同时受到公司特异与宏观因素影响。"],gaps:["OpenAI 企业业务收入与留存。","Apple AI 功能采用率。","Gemini 消费端付费转化。"]},
+      iran:{title:"美伊框架协议与油价校准",time:"2026-06-11 · Evening report",source:"Trump 单方宣布框架协议；CNBC 报道公告与油价下跌。伊朗官方确认仍然缺失。",support:["油价下跌与缓和预期方向一致。","晚间声明直接修正早间升级叙事。"],oppose:["伊朗官方尚未确认。","军事威胁是否取消仍不清晰。"],gaps:["协议具体条款。","能源股票行情覆盖。","后续油价与航运数据。"]},
+      security:{title:"Oracle PeopleSoft 零日漏洞",time:"2026-06-11 · Evening report",source:"The Hacker News 与 TechCrunch 均报道该事件；是否基于独立调查或共同引用同一来源，需要进一步核对。",support:["报道提及超过 100 家企业受影响。","事件与企业攻击面扩大主线一致。"],oppose:["缺少官方受影响企业清单。","没有对应市场观察篮子。"],gaps:["Oracle 官方补丁与披露。","真实损失和业务中断。","网络安全相关股票反馈。"]},
+      infrastructure:{title:"AI 基础设施需求与市场背离",time:"2026-06-10 · Market scan",source:"主线由多期新闻报告累积；价格反馈来自当日市场扫描。合同规模与来源独立性需要逐条核验。",support:["多条建设与供应链订单报道持续出现。","需求信号覆盖算力、光纤和区域数据中心。"],oppose:["相关股票在积极新闻后仍然回撤。","需求强劲不等于估值合理。"],gaps:["合同原始文件与收入确认时间。","分钟级价格与成交量。","可复核的历史基准回归。"]}
+    };
+    const drawer=document.querySelector("#drawer"),backdrop=document.querySelector("#backdrop");
+    function list(id,items){document.querySelector(id).innerHTML=items.map(x=>`<li>${x}</li>`).join("")}
+    document.querySelectorAll("[data-audit]").forEach(btn=>btn.onclick=()=>{const a=audits[btn.dataset.audit];document.querySelector("#drawer-title").textContent=a.title;document.querySelector("#drawer-time").textContent=a.time;document.querySelector("#drawer-source").textContent=a.source;list("#support",a.support);list("#oppose",a.oppose);list("#gaps",a.gaps);drawer.classList.add("open");backdrop.classList.add("open")});
+    function close(){drawer.classList.remove("open");backdrop.classList.remove("open")}document.querySelector("#close").onclick=close;backdrop.onclick=close;
+  </script>
+</body>
+</html>

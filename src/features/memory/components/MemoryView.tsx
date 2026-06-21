@@ -399,7 +399,6 @@ export function MemoryView({ llmRuntime }: { llmRuntime: LlmRuntime }) {
     </div>
   );
 }
-
 function MemoryBoard({
   stats,
   mode,
@@ -914,7 +913,11 @@ function DraftCandidatesPanel({
   actionKey: string;
   onDraftAction: (fileName: string, candidateIndex: number, action: "promote" | "dismiss") => void;
 }) {
-  const candidateCount = drafts.flatMap((draft) => draft.newCandidates).length;
+  const [openDraft, setOpenDraft] = useState("");
+  const draftCandidates = drafts.flatMap((draft) =>
+    (draft.newCandidates || []).map((candidate, index) => ({ draft, candidate, index }))
+  );
+  const candidateCount = draftCandidates.length;
 
   return (
     <section className="memory-draft-panel">
@@ -922,7 +925,7 @@ function DraftCandidatesPanel({
         <Sparkles className="h-40 w-40" />
       </div>
 
-      <div className="relative z-10">
+      <div className="memory-draft-content">
         <div className="mb-6 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="rounded-xl bg-white/20 p-2 backdrop-blur-sm">
@@ -933,27 +936,60 @@ function DraftCandidatesPanel({
           <span className="rounded-full bg-white/20 px-3 py-1 font-mono text-sm font-bold backdrop-blur-sm">{candidateCount}</span>
         </div>
 
-        <div className="space-y-4">
-          {drafts.flatMap((draft) =>
-            draft.newCandidates.map((candidate, index) => (
+        <div className="memory-draft-list">
+          {draftCandidates.map(({ draft, candidate, index }) => {
+            const draftKey = `${draft.fileName}-${index}`;
+            const isOpen = openDraft === draftKey;
+            const evidence = candidate.evidence || [];
+
+            return (
               <motion.div
-                key={`${draft.fileName}-${index}`}
+                key={draftKey}
                 initial={{ opacity: 0, x: 14 }}
                 animate={{ opacity: 1, x: 0 }}
-                className="memory-draft-card group/card"
+                role="button"
+                tabIndex={0}
+                onClick={() => setOpenDraft((current) => current === draftKey ? "" : draftKey)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    setOpenDraft((current) => current === draftKey ? "" : draftKey);
+                  }
+                }}
+                className={cn("memory-draft-card group/card", isOpen && "memory-draft-card-open")}
               >
-                <div className="mb-2 flex items-center justify-between">
-                  <span className="font-mono text-[9px] font-bold uppercase tracking-widest text-amber-600">{candidate.targetType} candidate</span>
-                  <ArrowUpRight className="h-3.5 w-3.5 text-amber-600 opacity-0 transition-opacity group-hover/card:opacity-100" />
+                <div className="memory-draft-card-top">
+                  <span>{candidate.targetType} candidate</span>
+                  <ChevronRight className={cn("h-3.5 w-3.5 text-amber-600 transition-all", isOpen ? "rotate-90 opacity-100" : "opacity-0 group-hover/card:opacity-100")} />
                 </div>
-                <div className="mb-2 font-serif text-xl font-bold">{candidate.title}</div>
-                <p className="text-xs italic leading-relaxed text-black/50">&quot;{candidate.reason}&quot;</p>
+                <div className="memory-draft-title">{candidate.title}</div>
+                <p className="memory-draft-reason">&quot;{candidate.reason}&quot;</p>
+                {!isOpen && evidence[0] && <p className="memory-draft-preview">{evidence[0]}</p>}
+                {isOpen && (
+                  <div className="memory-draft-expanded">
+                    <div className="memory-draft-meta">
+                      {draft.reportType} · {formatInTimeZone(new Date(draft.reportDate), LA_TZ, "MM-dd HH:mm")}
+                    </div>
+                    {evidence.length > 0 ? (
+                      <ul className="memory-draft-evidence">
+                        {evidence.map((item, evidenceIndex) => (
+                          <li key={`${draftKey}-evidence-${evidenceIndex}`}>{item}</li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <div className="memory-draft-empty-evidence">No evidence attached to this draft.</div>
+                    )}
+                  </div>
+                )}
                 <div className="memory-draft-actions">
                   <button
                     type="button"
                     className="memory-draft-action memory-draft-action-primary"
                     disabled={Boolean(actionKey)}
-                    onClick={() => onDraftAction(draft.fileName, index, "promote")}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onDraftAction(draft.fileName, index, "promote");
+                    }}
                   >
                     {actionKey === `${draft.fileName}-${index}-promote` ? (
                       <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -966,7 +1002,10 @@ function DraftCandidatesPanel({
                     type="button"
                     className="memory-draft-action memory-draft-action-muted"
                     disabled={Boolean(actionKey)}
-                    onClick={() => onDraftAction(draft.fileName, index, "dismiss")}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onDraftAction(draft.fileName, index, "dismiss");
+                    }}
                   >
                     {actionKey === `${draft.fileName}-${index}-dismiss` ? (
                       <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -977,8 +1016,8 @@ function DraftCandidatesPanel({
                   </button>
                 </div>
               </motion.div>
-            ))
-          )}
+            );
+          })}
           {candidateCount === 0 && (
             <div className="rounded-3xl border border-white/30 bg-white px-6 py-8 text-center font-mono text-[10px] font-bold uppercase tracking-[0.2em] text-amber-700 shadow-sm">
               No draft candidates pending

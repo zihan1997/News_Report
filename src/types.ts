@@ -35,6 +35,22 @@ export interface MarketIntelligence extends NewsReport {
   tickers: MarketTicker[];
 }
 
+export type MarketScheduleState = {
+  enabled: boolean;
+  slots: string[];
+  runtime: LlmRuntime;
+  lastClaimedSlotId: string | null;
+  lastRunAt: string | null;
+  lastRunStatus: "success" | "error" | null;
+  lastRunMessage: string | null;
+  running: boolean;
+  nextRun: {
+    slotId: string;
+    scheduledFor: string;
+    scheduledAt: number;
+  } | null;
+};
+
 export type NewsHistory = NewsReport[];
 
 export type SourceCategory = 'Hard News' | 'Tech Media' | 'Community Signal' | 'Security / Specialist' | 'Business' | 'Policy' | 'General';

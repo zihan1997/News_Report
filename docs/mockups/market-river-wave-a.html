@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>市场长河 A · 被改写的历史</title>
+  <style>
+    * { box-sizing: border-box; }
+    :root { --ink:#11110f; --muted:#77746d; --line:#dedbd4; --paper:#f4f3ee; --blue:#6874f8; --red:#e05c58; --green:#0a9b69; }
+    body { margin:0; background:var(--paper); color:var(--ink); font-family:Inter,"Microsoft YaHei",system-ui,sans-serif; }
+    button { font:inherit; }
+    main { max-width:1580px; margin:auto; padding:28px 30px 54px; }
+    .topline { display:flex; justify-content:space-between; align-items:center; margin-bottom:46px; font:800 10px/1 ui-monospace,monospace; letter-spacing:.15em; text-transform:uppercase; color:#98958e; }
+    .switch { display:flex; gap:4px; padding:4px; border-radius:99px; background:#e9e7e1; }
+    .switch a { padding:9px 14px; border-radius:99px; color:#817e77; text-decoration:none; }
+    .switch a.active { background:#111; color:#fff; }
+    header { display:grid; grid-template-columns:minmax(0,1fr) 430px; gap:44px; align-items:end; margin-bottom:30px; }
+    .eyebrow { margin-bottom:13px; color:var(--blue); font:900 11px/1 ui-monospace,monospace; letter-spacing:.18em; text-transform:uppercase; }
+    h1 { max-width:880px; margin:0; font:700 clamp(56px,7vw,106px)/.88 Georgia,serif; letter-spacing:-.035em; }
+    h1 em { color:#aaa69f; font-weight:400; }
+    .intro { padding:22px 0 5px; color:#6e6a63; font-size:15px; line-height:1.75; }
+    .intro strong { color:#111; }
+    .narrative-strip { display:grid; grid-template-columns:1fr auto; gap:30px; align-items:center; margin:30px 0 18px; padding:18px 20px; border:1px solid var(--line); border-radius:10px; background:#fff; }
+    .narrative-strip p { margin:4px 0 0; color:#77736c; font-size:12px; line-height:1.55; }
+    .mono { font:900 10px/1.2 ui-monospace,monospace; letter-spacing:.12em; text-transform:uppercase; }
+    .status { color:var(--green); }
+    .question { max-width:500px; text-align:right; color:#37342f; font:700 14px/1.45 Georgia,serif; }
+    .river-shell { position:relative; overflow:hidden; min-height:650px; border:1px solid var(--line); border-radius:12px; background:#fff; box-shadow:0 28px 75px rgba(40,36,29,.08); }
+    .river-head { display:flex; justify-content:space-between; align-items:center; padding:18px 22px; border-bottom:1px solid #ece9e3; }
+    .legend { display:flex; gap:22px; color:#8d8981; font-size:11px; }
+    .legend b { color:#222; }
+    .market-state { display:flex; gap:7px; flex-wrap:wrap; justify-content:flex-end; }
+    .ticker { padding:7px 9px; border-radius:5px; background:#f1efeb; color:#c34f4c; font:900 10px/1 ui-monospace,monospace; }
+    .river { position:relative; height:540px; overflow:hidden; background:linear-gradient(180deg,#fff 0%,#faf9f6 100%); }
+    .axis { position:absolute; inset:0 4%; display:grid; grid-template-columns:repeat(4,1fr); pointer-events:none; }
+    .axis span { border-left:1px solid #eeeae4; }
+    .axis span:last-child { border-right:1px solid #eeeae4; }
+    .water { position:absolute; left:4%; width:92%; height:0; }
+    .segment { position:absolute; height:17px; border-radius:99px; background:var(--blue); box-shadow:0 0 0 17px rgba(104,116,248,.065); }
+    .s1 { left:0; top:360px; width:20%; }
+    .s2 { left:28%; top:224px; width:17%; }
+    .s3 { left:53%; top:178px; width:16%; }
+    .s4 { left:77%; top:274px; width:23%; background:#7981c9; box-shadow:0 0 0 17px rgba(104,116,248,.05); }
+    .join { position:absolute; width:140px; height:110px; border-top:17px solid var(--blue); border-radius:50%; }
+    .j1 { left:18%; top:277px; transform:rotate(-44deg); }
+    .j2 { left:43%; top:190px; width:120px; height:60px; transform:rotate(-26deg); }
+    .j3 { left:67%; top:206px; width:135px; height:85px; transform:rotate(40deg); border-color:#7981c9; }
+    .level { position:absolute; padding:7px 9px; border-radius:4px; background:#f0efec; color:#8c8880; font:900 9px/1 ui-monospace,monospace; letter-spacing:.1em; text-transform:uppercase; }
+    .l1 { left:5%; top:401px; }.l2 { left:34%; top:265px; }.l3 { left:58%; top:137px; }.l4 { right:5%; top:315px; }
+    .cluster { position:absolute; z-index:3; width:190px; height:190px; border:0; border-radius:50%; background:transparent; cursor:pointer; transform:translate(-50%,-50%); }
+    .cluster::before,.cluster::after { content:""; position:absolute; inset:50%; width:18px; height:18px; border:2px solid var(--blue); border-radius:50%; transform:translate(-50%,-50%); animation:pulse 3.5s infinite; }
+    .cluster::after { animation-delay:.7s; }
+    .cluster.down::before,.cluster.down::after { border-color:var(--red); }
+    .core { position:absolute; top:50%; left:50%; width:24px; height:24px; border:6px solid #fff; border-radius:50%; background:var(--blue); box-shadow:0 0 0 3px var(--blue); transform:translate(-50%,-50%); transition:.25s; }
+    .down .core { background:var(--red); box-shadow:0 0 0 3px var(--red); }
+    .cluster:hover .core,.cluster.active .core { width:31px; height:31px; }
+    @keyframes pulse { from{ width:18px;height:18px;opacity:.8; } to{ width:170px;height:170px;margin:-76px;opacity:0; } }
+    .cluster-card { position:absolute; z-index:4; width:245px; transform:translateX(-50%); pointer-events:none; }
+    .cluster-card .date { color:#9a968f; }
+    .cluster-card h3 { margin:7px 0 6px; font:700 19px/1.1 Georgia,serif; }
+    .cluster-card p { margin:0; color:#7c7871; font-size:11px; line-height:1.5; }
+    .c1,.card1 { left:23%; }.c1 { top:342px; }.card1 { top:58px; }
+    .c2,.card2 { left:48%; }.c2 { top:224px; }.card2 { top:340px; }
+    .c3,.card3 { left:72%; }.c3 { top:178px; }.card3 { top:40px; }
+    .c4,.card4 { left:78%; }.c4 { top:260px; }.card4 { left:88%; top:355px; }
+    .detail { display:grid; grid-template-columns:280px 1fr; min-height:170px; border-top:1px solid #e8e4de; background:#f7f6f2; }
+    .detail-summary { padding:22px; border-right:1px solid #e4e0da; }
+    .detail-summary h3 { margin:7px 0; font:700 23px/1.1 Georgia,serif; }
+    .detail-summary p { margin:0; color:#78736c; font-size:12px; line-height:1.55; }
+    .evidence-list { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; padding:18px; }
+    .evidence { padding:13px; border:1px solid #e4e0da; border-radius:7px; background:#fff; }
+    .evidence time { color:#969188; font:800 9px/1 ui-monospace,monospace; }
+    .evidence strong { display:block; margin:7px 0 5px; font:700 14px/1.2 Georgia,serif; }
+    .evidence p { margin:0; color:#817c74; font-size:10px; line-height:1.45; }
+    @media(max-width:1000px){ header{grid-template-columns:1fr}.intro{max-width:720px}.river-shell{overflow-x:auto}.river{min-width:1150px}.detail{min-width:1150px}.narrative-strip{grid-template-columns:1fr}.question{text-align:left} }
+  </style>
+</head>
+<body>
+<main>
+  <div class="topline">
+    <span>Signal Desk · Market River Prototype</span>
+    <nav class="switch"><a class="active" href="market-river-wave-a.html">A · 被改写的历史</a><a href="market-river-wave-b.html">B · 证据审计流</a></nav>
+  </div>
+  <header>
+    <div>
+      <div class="eyebrow">版本 A · Event Shockwave</div>
+      <h1>重要的不是新闻发生，<br><em>而是判断被改写。</em></h1>
+    </div>
+    <div class="intro"><strong>只保留改变主线理解的时刻。</strong> 多条真实新闻被编辑成一次冲击；冲击之后，河流不会回到原位。点击波纹，查看这次判断变化由哪些本地新闻组成。</div>
+  </header>
+  <section class="narrative-strip">
+    <div><span class="mono status" id="status"></span><p id="state"></p></div>
+    <div class="question" id="question"></div>
+  </section>
+  <section class="river-shell">
+    <div class="river-head">
+      <div class="legend"><span><b>水位：</b>主线强度</span><span><b>冲击波：</b>足以改变判断的真实事件簇</span><span><b>回落：</b>市场背离，不等于主线失效</span></div>
+      <div class="market-state" id="tickers"></div>
+    </div>
+    <div class="river">
+      <div class="axis"><span></span><span></span><span></span><span></span></div>
+      <div class="water">
+        <i class="segment s1"></i><i class="join j1"></i><i class="segment s2"></i><i class="join j2"></i><i class="segment s3"></i><i class="join j3"></i><i class="segment s4"></i>
+      </div>
+      <span class="level l1">主题交易</span><span class="level l2">财务验证</span><span class="level l3">三重订单确认</span><span class="level l4">长期增强 · 短期降温</span>
+      <button class="cluster c1" data-index="0" aria-label="查看第一次跃迁"><i class="core"></i></button>
+      <article class="cluster-card card1"><span class="mono date">05.15 - 05.20</span><h3>需求从故事变成财务事实</h3><p>Nvidia 财报与 Cerebras IPO 共同完成第一次跃迁。</p></article>
+      <button class="cluster c2" data-index="1" aria-label="查看资本扩散"><i class="core"></i></button>
+      <article class="cluster-card card2"><span class="mono date">05.21 - 06.02</span><h3>资本沿供应链扩散</h3><p>台湾供应链、光互连与定制芯片开始共同承接叙事。</p></article>
+      <button class="cluster c3" data-index="2" aria-label="查看三重订单确认"><i class="core"></i></button>
+      <article class="cluster-card card3"><span class="mono date">06.05 - 06.10</span><h3>真实订单形成三重确认链</h3><p>算力、光纤与区域数据中心连续出现大额验证。</p></article>
+      <button class="cluster down c4" data-index="3" aria-label="查看市场背离"><i class="core"></i></button>
+      <article class="cluster-card card4"><span class="mono date">06.10 收盘</span><h3>新闻增强，市场后退</h3><p>META、NVDA、AMD 集体下跌，估值与兑现时间被重新定价。</p></article>
+    </div>
+    <div class="detail">
+      <div class="detail-summary"><span class="mono status" id="detail-kicker"></span><h3 id="detail-title"></h3><p id="detail-verdict"></p></div>
+      <div class="evidence-list" id="evidence-list"></div>
+    </div>
+  </section>
+</main>
+<script src="market-river-real-data.js"></script>
+<script>
+  const data = window.MARKET_RIVER_DATA;
+  const byId = Object.fromEntries(data.evidence.map(item => [item.id, item]));
+  document.querySelector("#status").textContent = `${data.narrative.status} · 置信度 ${data.narrative.confidence} · 更新 ${data.narrative.updated}`;
+  document.querySelector("#state").textContent = data.narrative.currentState;
+  document.querySelector("#question").textContent = data.narrative.question;
+  document.querySelector("#tickers").innerHTML = data.market.tickers.map(item => `<span class="ticker">${item.symbol} ${item.change}</span>`).join("");
+
+  function showCluster(index) {
+    document.querySelectorAll(".cluster").forEach(item => item.classList.toggle("active", Number(item.dataset.index) === index));
+    const cluster = data.clusters[index];
+    document.querySelector("#detail-kicker").textContent = `${cluster.date} · ${cluster.kicker}`;
+    document.querySelector("#detail-title").textContent = cluster.title;
+    document.querySelector("#detail-verdict").textContent = `${cluster.summary} ${cluster.verdict}`;
+    document.querySelector("#evidence-list").innerHTML = cluster.evidenceIds.map(id => {
+      const item = byId[id];
+      return `<article class="evidence"><time>${item.date} · ${item.source}</time><strong>${item.title}</strong><p>${item.summary}</p></article>`;
+    }).join("");
+  }
+  document.querySelectorAll(".cluster").forEach(item => item.addEventListener("click", () => showCluster(Number(item.dataset.index))));
+  showCluster(2);
+</script>
+</body>
+</html>

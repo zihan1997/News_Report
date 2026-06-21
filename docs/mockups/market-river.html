@@ -1,0 +1,567 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Signal Desk - 市场长河概念稿</title>
+  <style>
+    :root {
+      --ink: #11100f;
+      --muted: #77736c;
+      --line: #dedbd5;
+      --paper: #f5f4f1;
+      --panel: #ffffff;
+      --green: #0a9f69;
+      --orange: #f08b36;
+      --blue: #6174ee;
+      --red: #d65555;
+      --purple: #9a65d6;
+      --shadow: 0 18px 42px rgba(29, 27, 23, .08);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--paper);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    button { font: inherit; }
+
+    .shell {
+      min-height: 100vh;
+      padding: 22px 28px 54px;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+      padding-bottom: 20px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .brand {
+      font-family: Georgia, serif;
+      font-size: 24px;
+      font-weight: 700;
+    }
+
+    .nav, .filters, .ticker-filter {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px;
+      border-radius: 8px;
+      background: #ebe9e5;
+    }
+
+    .nav button, .filters button, .ticker-filter button {
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      padding: 9px 14px;
+      color: #88837b;
+      cursor: pointer;
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    .nav button.active, .filters button.active, .ticker-filter button.active {
+      color: var(--ink);
+      background: white;
+      box-shadow: 0 2px 7px rgba(0,0,0,.08);
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: end;
+      gap: 30px;
+      padding: 46px 0 28px;
+    }
+
+    .eyebrow, .section-label, .status, .date, .metric-label {
+      font-size: 10px;
+      font-weight: 900;
+      letter-spacing: .14em;
+      text-transform: uppercase;
+    }
+
+    .eyebrow { color: var(--blue); }
+
+    h1 {
+      max-width: 800px;
+      margin: 8px 0 10px;
+      font-family: Georgia, serif;
+      font-size: clamp(48px, 7vw, 92px);
+      line-height: .92;
+      letter-spacing: 0;
+    }
+
+    .hero p {
+      max-width: 680px;
+      margin: 0;
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.6;
+    }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(3, 118px);
+      gap: 8px;
+    }
+
+    .metric {
+      min-height: 84px;
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: white;
+    }
+
+    .metric strong {
+      display: block;
+      margin-top: 10px;
+      font-family: Georgia, serif;
+      font-size: 24px;
+    }
+
+    .toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 18px;
+    }
+
+    .river-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 320px;
+      gap: 18px;
+      align-items: start;
+    }
+
+    .river-panel, .side-panel {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      box-shadow: var(--shadow);
+    }
+
+    .river-panel { overflow: hidden; }
+
+    .river-header {
+      display: grid;
+      grid-template-columns: 270px repeat(4, minmax(155px, 1fr));
+      border-bottom: 1px solid var(--line);
+      background: #faf9f7;
+    }
+
+    .river-header > div {
+      padding: 14px 18px;
+      border-left: 1px solid var(--line);
+      color: #99948b;
+    }
+
+    .river-header > div:first-child { border-left: 0; }
+
+    .river {
+      display: grid;
+      grid-template-columns: 270px minmax(0, 1fr);
+      min-height: 166px;
+      border-bottom: 1px solid var(--line);
+      transition: opacity .2s ease, background .2s ease;
+    }
+
+    .river:last-child { border-bottom: 0; }
+    .river.dimmed { opacity: .24; }
+    .river.highlighted { background: #fffdf5; }
+
+    .river-meta {
+      padding: 21px 18px;
+      border-right: 1px solid var(--line);
+    }
+
+    .river-title {
+      margin: 8px 0 7px;
+      font-family: Georgia, serif;
+      font-size: 23px;
+      line-height: 1.08;
+    }
+
+    .river-summary {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      color: var(--green);
+    }
+
+    .status::before {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: currentColor;
+      content: "";
+    }
+
+    .status.emerging { color: var(--orange); }
+    .status.conflicted { color: var(--red); }
+    .status.unmapped { color: #9b968e; }
+
+    .track {
+      position: relative;
+      display: grid;
+      grid-template-columns: repeat(4, minmax(155px, 1fr));
+      align-items: stretch;
+      min-width: 0;
+    }
+
+    .track::before {
+      position: absolute;
+      top: 63px;
+      right: 8%;
+      left: 8%;
+      height: 5px;
+      border-radius: 999px;
+      background: var(--blue);
+      opacity: .18;
+      content: "";
+    }
+
+    .river.emerging-river .track::before {
+      height: 3px;
+      background: repeating-linear-gradient(90deg, var(--orange) 0 12px, transparent 12px 20px);
+      opacity: .55;
+    }
+
+    .river.unmapped-river .track::before {
+      height: 2px;
+      background: repeating-linear-gradient(90deg, #aaa59d 0 4px, transparent 4px 11px);
+      opacity: .5;
+    }
+
+    .node {
+      position: relative;
+      z-index: 2;
+      min-width: 0;
+      padding: 22px 15px 16px;
+      border-left: 1px solid #eeeae4;
+      cursor: pointer;
+      transition: background .18s ease;
+    }
+
+    .node:hover, .node.active { background: #f7f6f2; }
+
+    .dot {
+      width: 15px;
+      height: 15px;
+      margin: 15px 0 13px;
+      border: 4px solid white;
+      border-radius: 50%;
+      background: var(--blue);
+      box-shadow: 0 0 0 2px var(--blue);
+    }
+
+    .emerging-river .dot { background: var(--orange); box-shadow: 0 0 0 2px var(--orange); }
+    .unmapped-river .dot { background: #aaa59d; box-shadow: 0 0 0 2px #aaa59d; }
+
+    .node-title {
+      min-height: 34px;
+      font-size: 12px;
+      font-weight: 800;
+      line-height: 1.35;
+    }
+
+    .ticker {
+      display: inline-flex;
+      margin-top: 10px;
+      padding: 5px 7px;
+      border-radius: 5px;
+      background: #eef0ff;
+      color: #5567dc;
+      font-size: 9px;
+      font-weight: 900;
+      letter-spacing: .06em;
+    }
+
+    .ticker.down { color: #bd4e4e; background: #fff0f0; }
+    .ticker.neutral { color: #77736c; background: #efeeeb; }
+
+    .side-stack { display: grid; gap: 18px; }
+
+    .side-panel { padding: 20px; }
+
+    .side-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 16px;
+      font-family: Georgia, serif;
+      font-size: 22px;
+      font-weight: 700;
+    }
+
+    .signal {
+      padding: 13px 0;
+      border-top: 1px solid var(--line);
+    }
+
+    .signal:first-of-type { border-top: 0; }
+    .signal strong { display: block; margin-bottom: 5px; font-size: 12px; }
+    .signal p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+
+    .legend {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+    }
+
+    .legend span {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 800;
+    }
+
+    .legend i {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--blue);
+    }
+
+    .legend .orange { background: var(--orange); }
+    .legend .gray { background: #aaa59d; }
+    .legend .red { background: var(--red); }
+
+    .detail-drawer {
+      position: fixed;
+      right: 24px;
+      bottom: 24px;
+      width: min(460px, calc(100vw - 48px));
+      padding: 22px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: white;
+      box-shadow: 0 24px 70px rgba(0,0,0,.18);
+      transform: translateY(calc(100% + 40px));
+      opacity: 0;
+      transition: transform .25s ease, opacity .25s ease;
+    }
+
+    .detail-drawer.visible { transform: translateY(0); opacity: 1; }
+    .detail-drawer button { float: right; border: 0; background: none; cursor: pointer; font-weight: 900; }
+    .detail-drawer h3 { margin: 7px 0 8px; font-family: Georgia, serif; font-size: 24px; }
+    .detail-drawer p { color: var(--muted); font-size: 13px; line-height: 1.55; }
+
+    @media (max-width: 1100px) {
+      .hero { grid-template-columns: 1fr; }
+      .river-grid { grid-template-columns: 1fr; }
+      .river-panel { overflow-x: auto; }
+      .river-header, .river { min-width: 950px; }
+      .metrics { grid-template-columns: repeat(3, 1fr); }
+    }
+
+    @media (max-width: 700px) {
+      .shell { padding: 14px 12px 40px; }
+      .topbar { align-items: flex-start; }
+      .nav { display: none; }
+      .hero { padding-top: 30px; }
+      h1 { font-size: 56px; }
+      .metrics { grid-template-columns: 1fr; }
+      .toolbar { align-items: flex-start; flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <nav class="nav">
+        <button>情报</button>
+        <button class="active">市场</button>
+        <button>记忆</button>
+        <button>历史</button>
+      </nav>
+      <div class="brand">Signal Desk</div>
+    </header>
+
+    <section class="hero">
+      <div>
+        <div class="eyebrow">市场长河 · 90 天视图</div>
+        <h1>故事流动，<br>市场回应。</h1>
+        <p>一张持续生长的叙事地图：稳定主线、正在形成的主题与尚未归类的信号共同流动。价格表现只是沿河证据，永远不被直接视为因果。</p>
+      </div>
+      <div class="metrics">
+        <div class="metric"><span class="metric-label">正式主河</span><strong>4</strong></div>
+        <div class="metric"><span class="metric-label">形成中</span><strong>2</strong></div>
+        <div class="metric"><span class="metric-label">未归类</span><strong>3</strong></div>
+      </div>
+    </section>
+
+    <div class="toolbar">
+      <div class="filters">
+        <button class="active" data-filter="all">全部河流</button>
+        <button data-filter="main">正式叙事</button>
+        <button data-filter="emerging">形成中</button>
+        <button data-filter="unmapped">未归类</button>
+      </div>
+      <div class="ticker-filter">
+        <button class="active" data-ticker="all">全部标的</button>
+        <button data-ticker="NVDA">NVDA</button>
+        <button data-ticker="AMZN">AMZN</button>
+        <button data-ticker="QQQ">QQQ</button>
+      </div>
+    </div>
+
+    <div class="river-grid">
+      <section class="river-panel">
+        <div class="river-header">
+          <div class="section-label">河流</div>
+          <div class="date">5月14日</div>
+          <div class="date">5月27日</div>
+          <div class="date">6月4日</div>
+          <div class="date">6月10日</div>
+        </div>
+
+        <article class="river" data-kind="main" data-tickers="NVDA QQQ">
+          <div class="river-meta">
+            <span class="status">持续增强</span>
+            <div class="river-title">AI 基础设施需求</div>
+            <div class="river-summary">需求主线依然强劲，争议焦点已从是否采用，转向产能、电力与估值能否支撑。</div>
+          </div>
+          <div class="track">
+            <div class="node" data-detail="云厂商资本开支计划强化了需求主线，但基础设施投入能否直接转化为收入仍未确认。"><div class="dot"></div><div class="node-title">云厂商资本开支扩大</div><span class="ticker">QQQ +0.5%</span></div>
+            <div class="node" data-detail="Nvidia 财报提供了财务验证，表明基础设施需求正在转化为收入。"><div class="dot"></div><div class="node-title">财报确认需求</div><span class="ticker">NVDA +4.2%</span></div>
+            <div class="node" data-detail="电力约束开始成为部署的一阶瓶颈，市场反馈出现分歧。"><div class="dot"></div><div class="node-title">电力瓶颈浮现</div><span class="ticker down">NVDA -0.6%</span></div>
+            <div class="node" data-detail="需求信号仍然成立，但价格表现不再确认每一条正面新闻。"><div class="dot"></div><div class="node-title">需求仍强，估值出现分歧</div><span class="ticker">NVDA +0.8%</span></div>
+          </div>
+        </article>
+
+        <article class="river" data-kind="main" data-tickers="AMZN QQQ">
+          <div class="river-meta">
+            <span class="status conflicted">信号冲突</span>
+            <div class="river-title">AI Agent 商业化</div>
+            <div class="river-summary">产品分发正在加速，但真实采用率与转化证据明显落后。</div>
+          </div>
+          <div class="track">
+            <div class="node" data-detail="购物 Agent 正进入真实交易流程，但目前没有转化率证据。"><div class="dot"></div><div class="node-title">购物 Agent 上线</div><span class="ticker">AMZN +1.1%</span></div>
+            <div class="node" data-detail="平台批准改善了分发能力，但不一定意味着用户采用。"><div class="dot"></div><div class="node-title">平台入口扩大</div><span class="ticker neutral">QQQ +0.2%</span></div>
+            <div class="node" data-detail="用户反弹带来了产品能力之外的采用风险。"><div class="dot"></div><div class="node-title">用户阻力出现</div><span class="ticker down">QQQ -0.4%</span></div>
+            <div class="node" data-detail="由于收入归因仍然缺失，市场定价尚未给出明确结论。"><div class="dot"></div><div class="node-title">收入验证仍然缺失</div><span class="ticker neutral">AMZN +0.1%</span></div>
+          </div>
+        </article>
+
+        <article class="river emerging-river" data-kind="emerging" data-tickers="QQQ">
+          <div class="river-meta">
+            <span class="status emerging">形成中 · 自动聚类</span>
+            <div class="river-title">AI 对劳动力结构的影响</div>
+            <div class="river-summary">三个独立事件可能正在形成一条长期劳动力主线，目前尚未进入正式记忆。</div>
+          </div>
+          <div class="track">
+            <div class="node" data-detail="一家公司将裁员描述为 AI 转型的一部分，单一事件不足以形成长期主线。"><div class="dot"></div><div class="node-title">AI 相关裁员</div><span class="ticker neutral">QQQ +0.1%</span></div>
+            <div class="node" data-detail="第二家公司提供了跨公司证据，但样本仍然较小。"><div class="dot"></div><div class="node-title">第二家公司跟进</div><span class="ticker">QQQ +0.4%</span></div>
+            <div class="node" data-detail="招聘数据可能比公司表态提供更硬的信号，但仍需验证。"><div class="dot"></div><div class="node-title">初级岗位招聘减弱</div><span class="ticker neutral">市场尚未确认</span></div>
+            <div class="node" data-detail="在重复证据证明其持续性之前，自动聚类仍保持为形成中主题。"><div class="dot"></div><div class="node-title">等待第四个信号</div><span class="ticker neutral">无直接标的</span></div>
+          </div>
+        </article>
+
+        <article class="river unmapped-river" data-kind="unmapped" data-tickers="">
+          <div class="river-meta">
+            <span class="status unmapped">未归类信号</span>
+            <div class="river-title">重要，但尚未理解</div>
+            <div class="river-summary">这些信号保持可见，不会被强行塞进现有叙事。</div>
+          </div>
+          <div class="track">
+            <div class="node" data-detail="新的数据中心用电规则具有相关性，但其市场与叙事影响尚不清晰。"><div class="dot"></div><div class="node-title">新的数据中心用电规则</div><span class="ticker neutral">无直接标的</span></div>
+            <div class="node" data-detail="日本银行部署内部 Agent，如果在其他地区重复出现，可能形成企业采用主线。"><div class="dot"></div><div class="node-title">银行部署内部 Agent</div><span class="ticker neutral">缺少行情覆盖</span></div>
+            <div class="node" data-detail="出口管制听证会可能在政策细节明确后连接到现有半导体叙事。"><div class="dot"></div><div class="node-title">出口管制听证会公布</div><span class="ticker neutral">等待政策细节</span></div>
+            <div class="node" data-detail="未归类信号会保持可见，直到过期、形成聚类或被手动关联。"><div class="dot"></div><div class="node-title">等待自动复核</div><span class="ticker neutral">3 个信号</span></div>
+          </div>
+        </article>
+      </section>
+
+      <aside class="side-stack">
+        <section class="side-panel">
+          <div class="side-title">今日变化 <span class="status">实时</span></div>
+          <div class="signal"><strong>AI 基础设施主线增强</strong><p>新的财务验证出现，同时估值分歧进一步扩大。</p></div>
+          <div class="signal"><strong>AI Agent 主线转为冲突</strong><p>分发能力改善，但用户阻力和转化数据缺失削弱了信心。</p></div>
+          <div class="signal"><strong>一个新主题正在形成</strong><p>AI 对劳动力结构的影响已出现三个独立事件。</p></div>
+        </section>
+
+        <section class="side-panel">
+          <div class="side-title">如何阅读长河</div>
+          <div class="legend">
+            <span><i></i>正式主线</span>
+            <span><i class="orange"></i>形成中主题</span>
+            <span><i class="gray"></i>未归类信号</span>
+            <span><i class="red"></i>信号冲突</span>
+          </div>
+        </section>
+      </aside>
+    </div>
+  </main>
+
+  <aside class="detail-drawer" id="detail">
+    <button id="close-detail" aria-label="关闭">×</button>
+    <div class="eyebrow">信号详情</div>
+    <h3 id="detail-title">事件</h3>
+    <p id="detail-text"></p>
+  </aside>
+
+  <script>
+    const rivers = [...document.querySelectorAll(".river")];
+    const filterButtons = [...document.querySelectorAll("[data-filter]")];
+    const tickerButtons = [...document.querySelectorAll("[data-ticker]")];
+    const detail = document.querySelector("#detail");
+
+    filterButtons.forEach((button) => {
+      button.addEventListener("click", () => {
+        filterButtons.forEach((item) => item.classList.remove("active"));
+        button.classList.add("active");
+        const filter = button.dataset.filter;
+        rivers.forEach((river) => river.hidden = filter !== "all" && river.dataset.kind !== filter);
+      });
+    });
+
+    tickerButtons.forEach((button) => {
+      button.addEventListener("click", () => {
+        tickerButtons.forEach((item) => item.classList.remove("active"));
+        button.classList.add("active");
+        const ticker = button.dataset.ticker;
+        rivers.forEach((river) => {
+          const matches = ticker === "all" || river.dataset.tickers.split(" ").includes(ticker);
+          river.classList.toggle("dimmed", !matches);
+          river.classList.toggle("highlighted", matches && ticker !== "all");
+        });
+      });
+    });
+
+    document.querySelectorAll(".node").forEach((node) => {
+      node.addEventListener("click", () => {
+        document.querySelectorAll(".node").forEach((item) => item.classList.remove("active"));
+        node.classList.add("active");
+        document.querySelector("#detail-title").textContent = node.querySelector(".node-title").textContent;
+        document.querySelector("#detail-text").textContent = node.dataset.detail;
+        detail.classList.add("visible");
+      });
+    });
+
+    document.querySelector("#close-detail").addEventListener("click", () => detail.classList.remove("visible"));
+  </script>
+</body>
+</html>

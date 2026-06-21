@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>市场长河 B · 证据审计流</title>
+  <style>
+    * { box-sizing:border-box; }
+    :root { --ink:#11110f;--muted:#79756d;--line:#dedbd4;--paper:#f4f3ee;--orange:#ef8533;--red:#dc5c58;--blue:#6373ed;--green:#139b70; }
+    body { margin:0;background:var(--paper);color:var(--ink);font-family:Inter,"Microsoft YaHei",system-ui,sans-serif; }
+    button { font:inherit; }
+    main { max-width:1580px;margin:auto;padding:28px 30px 54px; }
+    .topline { display:flex;justify-content:space-between;align-items:center;margin-bottom:44px;font:800 10px/1 ui-monospace,monospace;letter-spacing:.15em;text-transform:uppercase;color:#98958e; }
+    .switch { display:flex;gap:4px;padding:4px;border-radius:99px;background:#e9e7e1; }
+    .switch a { padding:9px 14px;border-radius:99px;color:#817e77;text-decoration:none; }
+    .switch a.active { background:#111;color:#fff; }
+    header { display:grid;grid-template-columns:minmax(0,1fr) 430px;gap:44px;align-items:end;margin-bottom:30px; }
+    .eyebrow { margin-bottom:13px;color:var(--orange);font:900 11px/1 ui-monospace,monospace;letter-spacing:.18em;text-transform:uppercase; }
+    h1 { max-width:900px;margin:0;font:700 clamp(56px,7vw,106px)/.88 Georgia,serif;letter-spacing:-.035em; }
+    h1 em { color:#aaa69f;font-weight:400; }
+    .intro { padding:22px 0 5px;color:#6e6a63;font-size:15px;line-height:1.75; }
+    .intro strong { color:#111; }
+    .workbench { display:grid;grid-template-columns:290px minmax(0,1fr) 320px;min-height:720px;border:1px solid var(--line);border-radius:12px;background:#fff;box-shadow:0 28px 75px rgba(40,36,29,.08);overflow:hidden; }
+    aside,.detail { padding:22px; }
+    aside { border-right:1px solid #e9e5df;background:#faf9f6; }
+    .mono { font:900 10px/1.2 ui-monospace,monospace;letter-spacing:.12em;text-transform:uppercase; }
+    .status { color:var(--green); }
+    h2 { margin:10px 0;font:700 29px/1.05 Georgia,serif; }
+    aside p { color:#7c7870;font-size:11px;line-height:1.55; }
+    .filters { display:grid;gap:8px;margin:24px 0; }
+    .filter { display:flex;justify-content:space-between;width:100%;padding:12px;border:1px solid #e2ded7;border-radius:7px;background:#fff;color:#777169;cursor:pointer;text-align:left; }
+    .filter.active { border-color:#111;background:#111;color:#fff; }
+    .filter i { width:9px;height:9px;border-radius:50%;background:var(--orange); }
+    .filter[data-filter="friction"] i { background:var(--red); }.filter[data-filter="market"] i { background:var(--blue); }.filter[data-filter="all"] i { background:#111; }
+    .market-box { margin-top:24px;padding:15px;border-radius:8px;background:#fff;border:1px solid #e3dfd8; }
+    .market-box strong { display:block;margin:8px 0;font:700 17px/1.2 Georgia,serif; }
+    .tickers { display:flex;gap:5px;flex-wrap:wrap; }
+    .ticker { padding:6px 7px;border-radius:4px;background:#f1efeb;color:#c34f4c;font:900 9px/1 ui-monospace,monospace; }
+    .canvas { position:relative;min-width:0;padding:24px 28px 34px;overflow:hidden; }
+    .canvas-head { display:flex;justify-content:space-between;gap:20px;align-items:start;margin-bottom:20px; }
+    .canvas-head p { max-width:590px;margin:7px 0 0;color:#77736c;font-size:12px;line-height:1.55; }
+    .density { padding:8px 10px;border-radius:5px;background:#fff2e7;color:#bc6528;white-space:nowrap; }
+    .flow { position:relative;display:grid;gap:0;padding-left:52px; }
+    .flow::before { content:"";position:absolute;top:10px;bottom:10px;left:22px;width:2px;background:linear-gradient(var(--orange) 0 68%,var(--blue) 68% 100%); }
+    .event { position:relative;display:grid;grid-template-columns:100px 1fr auto;gap:14px;align-items:center;min-height:62px;padding:10px 12px;border-bottom:1px solid #eeeae4;cursor:pointer;transition:.2s; }
+    .event:hover,.event.active { background:#f7f5f0;transform:translateX(4px); }
+    .event::before { content:"";position:absolute;left:-36px;width:12px;height:12px;border:4px solid #fff;border-radius:50%;background:var(--orange);box-shadow:0 0 0 2px var(--orange); }
+    .event.friction::before { background:var(--red);box-shadow:0 0 0 2px var(--red); }
+    .event.market::before { width:18px;height:18px;left:-39px;background:var(--blue);box-shadow:0 0 0 3px var(--blue); }
+    .event.hidden { display:none; }
+    .date { color:#98938b;font:900 9px/1.3 ui-monospace,monospace;letter-spacing:.08em; }
+    .event strong { display:block;margin-bottom:4px;font:700 15px/1.2 Georgia,serif; }
+    .event p { margin:0;color:#817c74;font-size:10px;line-height:1.35; }
+    .strength { display:flex;gap:3px;align-items:end; }
+    .strength i { width:4px;height:8px;border-radius:3px;background:#ddd8d0; }
+    .strength i:nth-child(2) { height:13px; }.strength i:nth-child(3) { height:18px; }
+    .strength.s1 i:first-child,.strength.s2 i:nth-child(-n+2),.strength.s3 i { background:var(--orange); }
+    .event.friction .strength.s2 i:nth-child(-n+2) { background:var(--red); }
+    .event.market .strength.s3 i { background:var(--blue); }
+    .detail { border-left:1px solid #e9e5df;background:#fff; }
+    .detail-card { position:sticky;top:22px; }
+    .detail-type { color:var(--orange); }
+    .detail h3 { margin:12px 0;font:700 28px/1.08 Georgia,serif; }
+    .detail p { color:#706c65;font-size:12px;line-height:1.65; }
+    .tag-list { display:flex;gap:6px;flex-wrap:wrap;margin-top:18px; }
+    .tag { padding:7px 8px;border-radius:4px;background:#f0eeea;color:#55514a;font:800 9px/1 ui-monospace,monospace; }
+    .reading { margin-top:28px;padding-top:18px;border-top:1px solid #e8e4de; }
+    .reading strong { display:block;margin:8px 0;font:700 18px/1.25 Georgia,serif; }
+    @media(max-width:1100px){ header{grid-template-columns:1fr}.workbench{grid-template-columns:250px minmax(650px,1fr);overflow-x:auto}.detail{grid-column:1/-1;border-left:0;border-top:1px solid #e9e5df}.detail-card{position:static} }
+  </style>
+</head>
+<body>
+<main>
+  <div class="topline">
+    <span>Signal Desk · Market River Prototype</span>
+    <nav class="switch"><a href="market-river-wave-a.html">A · 被改写的历史</a><a class="active" href="market-river-wave-b.html">B · 证据审计流</a></nav>
+  </div>
+  <header>
+    <div><div class="eyebrow">版本 B · Evidence Ledger</div><h1>每一次判断，<br><em>都应该能被审计。</em></h1></div>
+    <div class="intro"><strong>这里不合并证据，也不隐藏矛盾。</strong> 新闻、阻力与市场反馈沿时间顺序共同推进叙事。筛选不同类型，看看今天的判断究竟站在什么上面。</div>
+  </header>
+  <section class="workbench">
+    <aside>
+      <span class="mono status" id="status"></span>
+      <h2 id="narrative-title"></h2>
+      <p id="state"></p>
+      <div class="filters">
+        <button class="filter active" data-filter="all"><span>全部证据</span><i></i></button>
+        <button class="filter" data-filter="support"><span>增强主线</span><i></i></button>
+        <button class="filter" data-filter="friction"><span>阻力与缺口</span><i></i></button>
+        <button class="filter" data-filter="market"><span>市场反馈</span><i></i></button>
+      </div>
+      <div class="market-box"><span class="mono">Latest Market Read</span><strong id="market-read"></strong><div class="tickers" id="tickers"></div></div>
+    </aside>
+    <section class="canvas">
+      <div class="canvas-head"><div><span class="mono">2026.05.15 → 2026.06.10</span><p>线不是股价，也不是模型评分。它是一份按时间排列的证据账本：什么增强了主线，什么提醒我们别太乐观，市场又在何时拒绝跟随新闻。</p></div><span class="mono density">10 条真实证据 · 1 次明显背离</span></div>
+      <div class="flow" id="flow"></div>
+    </section>
+    <section class="detail">
+      <div class="detail-card">
+        <span class="mono detail-type" id="detail-type"></span>
+        <h3 id="detail-title"></h3>
+        <p id="detail-summary"></p>
+        <div class="tag-list" id="detail-tags"></div>
+        <div class="reading"><span class="mono">Why It Matters</span><strong id="detail-reading"></strong><p id="detail-question"></p></div>
+      </div>
+    </section>
+  </section>
+</main>
+<script src="market-river-real-data.js"></script>
+<script>
+  const data = window.MARKET_RIVER_DATA;
+  const typeLabel = { support:"增强主线", friction:"阻力与缺口", market:"市场反馈" };
+  document.querySelector("#status").textContent = `${data.narrative.status} · 置信度 ${data.narrative.confidence}`;
+  document.querySelector("#narrative-title").textContent = data.narrative.title;
+  document.querySelector("#state").textContent = data.narrative.currentState;
+  document.querySelector("#market-read").textContent = data.market.read;
+  document.querySelector("#tickers").innerHTML = data.market.tickers.map(item => `<span class="ticker">${item.symbol} ${item.change}</span>`).join("");
+
+  const flow = document.querySelector("#flow");
+  flow.innerHTML = data.evidence.map((item,index) => `
+    <article class="event ${item.type}" data-index="${index}" data-type="${item.type}">
+      <time class="date">${item.date}<br>${item.source}</time>
+      <div><strong>${item.title}</strong><p>${item.summary}</p></div>
+      <span class="strength s${item.strength}"><i></i><i></i><i></i></span>
+    </article>`).join("");
+
+  function showEvidence(index) {
+    document.querySelectorAll(".event").forEach(item => item.classList.toggle("active", Number(item.dataset.index) === index));
+    const item = data.evidence[index];
+    document.querySelector("#detail-type").textContent = `${item.date} · ${typeLabel[item.type]} · ${item.source}`;
+    document.querySelector("#detail-title").textContent = item.title;
+    document.querySelector("#detail-summary").textContent = item.summary;
+    document.querySelector("#detail-tags").innerHTML = item.tags.map(tag => `<span class="tag">${tag}</span>`).join("");
+    document.querySelector("#detail-reading").textContent = item.type === "market"
+      ? "市场正在区分“需求真实”与“当前价格是否合理”。"
+      : item.type === "friction"
+        ? "这条证据没有推翻主线，但限制了它可以被外推的范围。"
+        : "这条证据让 AI 基建需求从叙事进一步靠近可验证事实。";
+    document.querySelector("#detail-question").textContent = data.narrative.question;
+  }
+
+  document.querySelectorAll(".event").forEach(item => item.addEventListener("click", () => showEvidence(Number(item.dataset.index))));
+  document.querySelectorAll(".filter").forEach(button => button.addEventListener("click", () => {
+    document.querySelectorAll(".filter").forEach(item => item.classList.toggle("active", item === button));
+    document.querySelectorAll(".event").forEach(item => item.classList.toggle("hidden", button.dataset.filter !== "all" && item.dataset.type !== button.dataset.filter));
+  }));
+  showEvidence(data.evidence.length - 1);
+</script>
+</body>
+</html>

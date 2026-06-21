@@ -6,8 +6,11 @@ import fs from "fs/promises";
 import OpenAI from "openai";
 import dotenv from "dotenv";
 import { formatInTimeZone } from "date-fns-tz";
+import { randomUUID } from "node:crypto";
 import { collectNewsFromRSS, filterRecentNews, dedupeNews, rankNews, enrichNewsItems } from "./src/lib/news-workflow.ts";
 import { fetchMarketSnapshot } from "./src/lib/finnhub.ts";
+import { fillTemplate } from "./src/lib/prompt-template.ts";
+import { DEFAULT_MARKET_SLOTS, dueMarketSlot, nextMarketRun } from "./src/features/market/market-schedule.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -26,6 +29,9 @@ const SYSTEM_PROMPT_PATH = path.join(__dirname, "src", "prompts", "system-report
 const FINAL_OUTPUT_INSTRUCTION_PATH = path.join(__dirname, "src", "prompts", "final-output-instruction.md");
 const MEMORY_PATCH_PROMPT_PATH = path.join(__dirname, "src", "prompts", "memory-patch.md");
 const MEMORY_CONSOLIDATE_PROMPT_PATH = path.join(__dirname, "src", "prompts", "memory-consolidate.md");
+const MARKET_PROMPT_PATH = path.join(__dirname, "src", "prompts", "market-intelligence.md");
+const CONFIG_DIR = path.join(__dirname, "config");
+const MARKET_SCHEDULE_PATH = path.join(CONFIG_DIR, "market-schedule.json");
 const LA_TZ = "America/Los_Angeles";
 
 dotenv.config({ path: path.join(__dirname, ".env.local"), override: true });
@@ -60,6 +66,16 @@ type StoredReport = {
   content: string;
   timestamp: number;
   tickers?: unknown[];
+};
+
+type MarketScheduleSettings = {
+  enabled: boolean;
+  slots: string[];
+  runtime: "local" | "cloud";
+  lastClaimedSlotId: string | null;
+  lastRunAt: string | null;
+  lastRunStatus: "success" | "error" | null;
+  lastRunMessage: string | null;
 };
 
 type MemoryFile = {
@@ -131,6 +147,63 @@ function reportBaseName(report: StoredReport) {
 
 async function ensureReportsDir() {
   await fs.mkdir(REPORTS_DIR, { recursive: true });
+}
+
+async function saveStoredReport(report: StoredReport) {
+  await ensureReportsDir();
+  const baseName = reportBaseName(report);
+  await fs.writeFile(path.join(REPORTS_DIR, `${baseName}.json`), JSON.stringify(report, null, 2), "utf8");
+  await fs.writeFile(path.join(REPORTS_DIR, `${baseName}.md`), reportMarkdown(report), "utf8");
+  const entries = await fs.readdir(REPORTS_DIR, { withFileTypes: true });
+  const safeId = report.id.replace(/[^a-z0-9-]/gi, "").slice(0, 12);
+  await Promise.all(
+    entries
+      .filter((entry) => entry.isFile() && entry.name.includes(safeId) && entry.name.includes(".draft."))
+      .map((entry) => fs.unlink(path.join(REPORTS_DIR, entry.name)))
+  );
+}
+
+function defaultMarketSchedule(): MarketScheduleSettings {
+  return {
+    enabled: false,
+    slots: DEFAULT_MARKET_SLOTS,
+    runtime: "cloud",
+    lastClaimedSlotId: null,
+    lastRunAt: null,
+    lastRunStatus: null,
+    lastRunMessage: null,
+  };
+}
+
+function normalizeMarketSchedule(value: Partial<MarketScheduleSettings> | null | undefined): MarketScheduleSettings {
+  const validSlots = Array.isArray(value?.slots)
+    ? [...new Set(value.slots.filter((slot) => /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(slot)))].sort()
+    : [];
+  return {
+    ...defaultMarketSchedule(),
+    ...value,
+    enabled: value?.enabled === true,
+    slots: validSlots.length > 0 ? validSlots : DEFAULT_MARKET_SLOTS,
+    runtime: value?.runtime === "local" ? "local" : "cloud",
+  };
+}
+
+async function readMarketSchedule() {
+  await fs.mkdir(CONFIG_DIR, { recursive: true });
+  try {
+    return normalizeMarketSchedule(JSON.parse(await fs.readFile(MARKET_SCHEDULE_PATH, "utf8")));
+  } catch {
+    const settings = defaultMarketSchedule();
+    await fs.writeFile(MARKET_SCHEDULE_PATH, JSON.stringify(settings, null, 2), "utf8");
+    return settings;
+  }
+}
+
+async function writeMarketSchedule(settings: MarketScheduleSettings) {
+  await fs.mkdir(CONFIG_DIR, { recursive: true });
+  const normalized = normalizeMarketSchedule(settings);
+  await fs.writeFile(MARKET_SCHEDULE_PATH, JSON.stringify(normalized, null, 2), "utf8");
+  return normalized;
 }
 
 async function readStoredReports(): Promise<StoredReport[]> {
@@ -912,13 +985,18 @@ function applyConsolidationToContent(content: string, targetType: MemoryTargetTy
   let nextContent = updateLastUpdatedToNow(content);
   nextContent = replaceSection(nextContent, "Current State", proposal.currentState || "");
 
+  const replaceBulletSectionIfPresent = (source: string, heading: string, items?: string[]) => {
+    if (!Array.isArray(items) || items.length === 0) return source;
+    return replaceSection(source, heading, bulletSection(items));
+  };
+
   if (targetType === "story") {
-    nextContent = replaceSection(nextContent, "Resolved", bulletSection(proposal.resolved || []));
-    nextContent = replaceSection(nextContent, "Open Gaps", bulletSection(proposal.openGaps || []));
+    nextContent = replaceBulletSectionIfPresent(nextContent, "Resolved", proposal.resolved);
+    nextContent = replaceBulletSectionIfPresent(nextContent, "Open Gaps", proposal.openGaps);
   } else {
-    nextContent = replaceSection(nextContent, "Weak Signals / Evidence Against", bulletSection(proposal.weakSignals || []));
-    nextContent = replaceSection(nextContent, "Open Questions", bulletSection(proposal.openQuestions || []));
-    nextContent = replaceSection(nextContent, "Watchlist", bulletSection(proposal.watchlist || []));
+    nextContent = replaceBulletSectionIfPresent(nextContent, "Weak Signals / Evidence Against", proposal.weakSignals);
+    nextContent = replaceBulletSectionIfPresent(nextContent, "Open Questions", proposal.openQuestions);
+    nextContent = replaceBulletSectionIfPresent(nextContent, "Watchlist", proposal.watchlist);
   }
 
   return nextContent.trimEnd() + "\n";
@@ -1095,7 +1173,8 @@ async function writeConsolidationRecord({
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 3000;
+  let marketSchedulerRunning = false;
   const systemReportPrompt = await fs
     .readFile(SYSTEM_PROMPT_PATH, "utf8")
     .catch(() => "You are a high-signal news intelligence assistant. Provide a final, polished markdown report in Chinese.");
@@ -1108,6 +1187,9 @@ async function startServer() {
   const memoryConsolidatePrompt = await fs
     .readFile(MEMORY_CONSOLIDATE_PROMPT_PATH, "utf8")
     .catch(() => "Return JSON that consolidates the provided memory item without adding new facts.");
+  const marketPromptTemplate = await fs
+    .readFile(MARKET_PROMPT_PATH, "utf8")
+    .catch(() => "Create a Chinese market intelligence report from the supplied news and market snapshot.");
   memoryConsolidatePromptCache = memoryConsolidatePrompt;
 
   app.use(express.json({ limit: "5mb" }));
@@ -1571,21 +1653,7 @@ async function startServer() {
         return;
       }
 
-      await ensureReportsDir();
-      const baseName = reportBaseName(report);
-      await fs.writeFile(
-        path.join(REPORTS_DIR, `${baseName}.json`),
-        JSON.stringify(report, null, 2),
-        "utf8"
-      );
-      await fs.writeFile(path.join(REPORTS_DIR, `${baseName}.md`), reportMarkdown(report), "utf8");
-      const entries = await fs.readdir(REPORTS_DIR, { withFileTypes: true });
-      const safeId = report.id.replace(/[^a-z0-9-]/gi, "").slice(0, 12);
-      await Promise.all(
-        entries
-          .filter((entry) => entry.isFile() && entry.name.includes(safeId) && entry.name.includes(".draft."))
-          .map((entry) => fs.unlink(path.join(REPORTS_DIR, entry.name)))
-      );
+      await saveStoredReport(report);
 
       const reports = await readStoredReports();
       res.json({ report, reports });
@@ -1675,6 +1743,69 @@ async function startServer() {
     }
   });
 
+  async function marketScheduleResponse() {
+    const settings = await readMarketSchedule();
+    return {
+      ...settings,
+      running: marketSchedulerRunning,
+      nextRun: settings.enabled ? nextMarketRun(new Date(), settings.slots) : null,
+    };
+  }
+
+  app.get("/api/market-schedule", async (_req, res) => {
+    try {
+      res.json(await marketScheduleResponse());
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to read market schedule." });
+    }
+  });
+
+  app.put("/api/market-schedule", async (req, res) => {
+    try {
+      const current = await readMarketSchedule();
+      await writeMarketSchedule(normalizeMarketSchedule({
+        ...current,
+        enabled: req.body?.enabled === true,
+        slots: Array.isArray(req.body?.slots) ? req.body.slots : current.slots,
+        runtime: req.body?.runtime === "local" ? "local" : "cloud",
+      }));
+      res.json(await marketScheduleResponse());
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to update market schedule." });
+    }
+  });
+
+  app.post("/api/market-schedule/run", async (req, res) => {
+    if (marketSchedulerRunning) {
+      res.status(409).json({ error: "A scheduled market scan is already running." });
+      return;
+    }
+    try {
+      marketSchedulerRunning = true;
+      const settings = await readMarketSchedule();
+      const runtime = normalizeRuntime(req.body?.runtime || settings.runtime);
+      const report = await runServerMarketScan(runtime, "manual");
+      await writeMarketSchedule({
+        ...settings,
+        lastRunAt: new Date().toISOString(),
+        lastRunStatus: "success",
+        lastRunMessage: `Manual scheduled scan saved: ${report.id}`,
+      });
+      res.json({ report, schedule: await marketScheduleResponse() });
+    } catch (error: any) {
+      const settings = await readMarketSchedule();
+      await writeMarketSchedule({
+        ...settings,
+        lastRunAt: new Date().toISOString(),
+        lastRunStatus: "error",
+        lastRunMessage: error.message || "Scheduled market scan failed.",
+      });
+      res.status(500).json({ error: error.message || "Scheduled market scan failed." });
+    } finally {
+      marketSchedulerRunning = false;
+    }
+  });
+
   type LlmRuntime = "local" | "cloud";
 
   function getRuntimeConfig(runtime: LlmRuntime = "local") {
@@ -1737,6 +1868,89 @@ async function startServer() {
       .replace(/\[TOOL_CALL\][\s\S]*?\[\/TOOL_CALL\]/g, "")
       .replace(/^(鎴戝皢|I will|Searching|姝ｅ湪鎼滅储)[\s\S]*?(:|\n)/i, "")
       .trim();
+  }
+
+  async function runServerMarketScan(runtime: LlmRuntime, trigger: "scheduled" | "manual") {
+    const started = Date.now();
+    const now = new Date();
+    const reports = await readStoredReports();
+    const today = formatInTimeZone(now, LA_TZ, "yyyy-MM-dd");
+    const newsReports = reports.filter((report) => report.type !== "market");
+    const todayNews = newsReports
+      .filter((report) => formatInTimeZone(new Date(report.date), LA_TZ, "yyyy-MM-dd") === today)
+      .map((report) => `[TODAY ${report.type}]\n${report.content}`)
+      .join("\n\n");
+    const recentNews = newsReports
+      .slice(0, 5)
+      .map((report) => `[NEWS ${formatInTimeZone(new Date(report.date), LA_TZ, "MM-dd HH:mm")}]\n${report.content}`)
+      .join("\n\n---\n\n");
+    const recentMarkets = reports
+      .filter((report) => report.type === "market")
+      .slice(0, 3)
+      .map((report) => `[PREVIOUS MARKET SCAN ${formatInTimeZone(new Date(report.date), LA_TZ, "MM-dd HH:mm")}]\n${report.content.slice(0, 1800)}`)
+      .join("\n\n---\n\n");
+    const newsContext = [
+      `CURRENT TIME: ${formatInTimeZone(now, LA_TZ, "HH:mm")} (LA Time)`,
+      "",
+      "=== RECENT NEWS HISTORY ===",
+      recentNews || "No recent news reports.",
+      "",
+      "=== TODAY'S NEWEST UPDATES ===",
+      todayNews || "No news briefings generated yet for today.",
+    ].join("\n");
+
+    console.log(`[Market Scheduler] ${trigger} scan started with ${runtime} runtime.`);
+    const snapshot = await fetchMarketSnapshot();
+    const marketStatusSummary = snapshot.some((quote) => quote.marketStatus === "open") ? "Open" : "Closed";
+    const tickerRows = snapshot.map((quote) => ({
+      symbol: quote.name,
+      price: quote.price !== null ? quote.price.toLocaleString(undefined, { minimumFractionDigits: 2 }) : "Unknown",
+      change: quote.change !== null ? `${quote.change >= 0 ? "+" : ""}${quote.change.toFixed(2)}` : "Unknown",
+      changePercent: quote.changePercent !== null ? `${quote.changePercent >= 0 ? "+" : ""}${quote.changePercent.toFixed(2)}%` : "Unknown",
+      marketStatus: quote.marketStatus,
+    }));
+    const tickerJson = JSON.stringify(tickerRows, null, 2);
+    const query = ["market", newsContext.slice(0, 3500), recentMarkets.slice(0, 1500), tickerJson].join("\n\n");
+    const queryTokens = tokenizeForSearch(query);
+    const memoryContext = (await readMemoryFiles())
+      .map((memory) => ({ memory, score: scoreMemory(queryTokens, memory) }))
+      .filter((item) => item.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 6)
+      .map(({ memory }) => `### ${memory.kind.toUpperCase()}: ${memory.name}\n${compactMemoryContent(memory.content)}`)
+      .join("\n\n---\n\n");
+    const prompt = fillTemplate(marketPromptTemplate, {
+      timeStr: formatInTimeZone(now, LA_TZ, "HH:mm"),
+      dateStr: formatInTimeZone(now, LA_TZ, "EEEE, MMMM d, yyyy"),
+      tickerJson,
+      newsContext,
+      historyContext: recentMarkets,
+      memoryContext: memoryContext || "无",
+      marketStatusSummary,
+    });
+    const { client, config } = getLlmClient(runtime);
+    const completion = await client.chat.completions.create(buildCompletionParams(config.model, prompt, runtime === "cloud" ? 4096 : 2048, false) as any);
+    const message = completion.choices[0]?.message as any;
+    const content = cleanLlmContent(message?.content || message?.reasoning_content || message?.reasoning || "");
+    if (!content) throw new Error("Scheduled market scan returned no final content.");
+
+    const report: StoredReport = {
+      id: randomUUID(),
+      date: formatInTimeZone(now, LA_TZ, "yyyy-MM-dd'T'HH:mm:ssXXX"),
+      type: "market",
+      content,
+      timestamp: now.getTime(),
+      tickers: tickerRows.map((ticker) => ({
+        symbol: ticker.symbol,
+        price: ticker.price,
+        change: ticker.change,
+        changePercent: ticker.changePercent,
+        trend: ticker.changePercent.startsWith("+") ? "up" : ticker.changePercent.startsWith("-") ? "down" : "neutral",
+      })),
+    };
+    await saveStoredReport(report);
+    console.log(`[Market Scheduler] ${trigger} scan saved in ${formatElapsedMs(Date.now() - started)} as ${reportBaseName(report)}.`);
+    return report;
   }
 
   function extractMarkdownReport(text: string) {
@@ -1999,6 +2213,42 @@ async function startServer() {
       });
     }
   });
+
+  const pollMarketSchedule = async () => {
+    if (marketSchedulerRunning) return;
+    const settings = await readMarketSchedule();
+    if (!settings.enabled) return;
+    const due = dueMarketSlot(new Date(), settings.slots, settings.lastClaimedSlotId, 20);
+    if (!due) return;
+
+    marketSchedulerRunning = true;
+    await writeMarketSchedule({ ...settings, lastClaimedSlotId: due.slotId });
+    console.log(`[Market Scheduler] Claiming ${due.slotId}.`);
+    try {
+      const report = await runServerMarketScan(settings.runtime, "scheduled");
+      await writeMarketSchedule({
+        ...(await readMarketSchedule()),
+        lastRunAt: new Date().toISOString(),
+        lastRunStatus: "success",
+        lastRunMessage: `Scheduled scan saved: ${report.id}`,
+      });
+    } catch (error: any) {
+      console.error("[Market Scheduler] Scheduled scan failed:", error);
+      await writeMarketSchedule({
+        ...(await readMarketSchedule()),
+        lastRunAt: new Date().toISOString(),
+        lastRunStatus: "error",
+        lastRunMessage: error.message || "Scheduled market scan failed.",
+      });
+    } finally {
+      marketSchedulerRunning = false;
+    }
+  };
+
+  setInterval(() => {
+    pollMarketSchedule().catch((error) => console.error("[Market Scheduler] Poll failed:", error));
+  }, 60_000);
+  pollMarketSchedule().catch((error) => console.error("[Market Scheduler] Initial poll failed:", error));
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {

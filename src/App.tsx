@@ -12,8 +12,9 @@ import { updateMemoryFromReport } from './lib/memory';
 import { buildMorningHistoryContext } from './features/news/news-context';
 import { generateNews } from './features/news/news-flow';
 import { generateMarketIntelligence } from './features/market/market-flow';
+import { getMarketSchedule, runScheduledMarketNow, updateMarketSchedule } from './features/market/market-schedule-api';
 import { cleanMarketContent } from './lib/report-format';
-import { AppView, HistoryFilter, LlmRuntime, ReportDepth, NewsReport, NewsHistory, MarketIntelligence, RSSHealthStats } from './types';
+import { AppView, HistoryFilter, LlmRuntime, ReportDepth, NewsReport, NewsHistory, MarketIntelligence, MarketScheduleState, RSSHealthStats } from './types';
 
 const LA_TZ = 'America/Los_Angeles';
 
@@ -52,7 +53,9 @@ export default function App() {
   const [llmRuntime, setLlmRuntime] = useState<LlmRuntime>('cloud');
   const [reportDepth, setReportDepth] = useState<ReportDepth>('balanced');
   const [activeGeneration, setActiveGeneration] = useState<'morning' | 'evening' | 'market' | null>(null);
+  const [marketSchedule, setMarketSchedule] = useState<MarketScheduleState | null>(null);
   const activeRuntimeRef = useRef<LlmRuntime>('cloud');
+  const lastScheduledRunRef = useRef<string | null>(null);
 
   const appendGenerationLog = (message: string) => {
     const stamp = formatInTimeZone(new Date(), LA_TZ, 'HH:mm:ss');
@@ -82,6 +85,33 @@ export default function App() {
 
     loadHistory();
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    const refreshSchedule = async () => {
+      try {
+        const schedule = await getMarketSchedule();
+        if (!active) return;
+        setMarketSchedule(schedule);
+        if (schedule.lastRunAt && lastScheduledRunRef.current && schedule.lastRunAt !== lastScheduledRunRef.current) {
+          const loadedHistory = await storage.getHistory();
+          if (!active) return;
+          setHistory(loadedHistory);
+          const latestMarket = loadedHistory.find((report) => report.type === "market");
+          if (latestMarket && view === "markets") setSelectedReport(latestMarket);
+        }
+        lastScheduledRunRef.current = schedule.lastRunAt;
+      } catch (scheduleError) {
+        console.error("Failed to load market schedule", scheduleError);
+      }
+    };
+    refreshSchedule();
+    const interval = window.setInterval(refreshSchedule, 30_000);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
+  }, [view]);
 
   useEffect(() => {
     activeRuntimeRef.current = llmRuntime;
@@ -210,6 +240,32 @@ ${todayNews || 'No news briefings generated yet for today.'}
     } finally {
       setIsGenerating(false);
       setActiveGeneration(null);
+    }
+  };
+
+  const handleUpdateMarketSchedule = async (enabled: boolean, slots: string[], runtime: LlmRuntime) => {
+    try {
+      const schedule = await updateMarketSchedule(enabled, slots, runtime);
+      setMarketSchedule(schedule);
+      setError(enabled ? "Scheduled market scans enabled." : "Scheduled market scans paused.");
+    } catch (scheduleError) {
+      const message = scheduleError instanceof Error ? scheduleError.message : "Failed to update market schedule.";
+      setError(message);
+    }
+  };
+
+  const handleRunScheduledMarketNow = async () => {
+    setError(null);
+    try {
+      const result = await runScheduledMarketNow(marketSchedule?.runtime || llmRuntime);
+      const loadedHistory = await storage.getHistory();
+      setHistory(loadedHistory);
+      setSelectedReport(result.report);
+      setMarketSchedule(result.schedule);
+      setView("markets");
+    } catch (scheduleError) {
+      const message = scheduleError instanceof Error ? scheduleError.message : "Failed to run scheduled market scan.";
+      setError(message);
     }
   };
 
@@ -479,7 +535,10 @@ ${todayNews || 'No news briefings generated yet for today.'}
                 reasoningContent={reasoningContent}
                 llmRuntime={llmRuntime}
                 modelName={llmInfo.model}
+                schedule={marketSchedule}
                 onGenerateMarket={handleGenerateMarket}
+                onUpdateSchedule={handleUpdateMarketSchedule}
+                onRunScheduledNow={handleRunScheduledMarketNow}
                 onSelectReport={setSelectedReport}
                 onViewMarketHistory={() => {
                   setHistoryFilter('market');
