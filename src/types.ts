@@ -1,10 +1,15 @@
 export interface NewsReport {
   id: string;
-  date: string; // ISO date string
+  date: string; // ISO date string with the report's local timezone offset
   type: 'morning' | 'evening' | 'market';
   content: string; // Markdown content
   timestamp: number;
 }
+
+export type LlmRuntime = 'local' | 'cloud';
+export type ReportDepth = 'fast' | 'balanced' | 'wide';
+export type AppView = 'reader' | 'history' | 'markets' | 'memory';
+export type HistoryFilter = 'all' | 'news' | 'market';
 
 export type MarketQuote = {
   symbol: string;
@@ -29,6 +34,22 @@ export interface MarketIntelligence extends NewsReport {
   type: 'market';
   tickers: MarketTicker[];
 }
+
+export type MarketScheduleState = {
+  enabled: boolean;
+  slots: string[];
+  runtime: LlmRuntime;
+  lastClaimedSlotId: string | null;
+  lastRunAt: string | null;
+  lastRunStatus: "success" | "error" | null;
+  lastRunMessage: string | null;
+  running: boolean;
+  nextRun: {
+    slotId: string;
+    scheduledFor: string;
+    scheduledAt: number;
+  } | null;
+};
 
 export type NewsHistory = NewsReport[];
 

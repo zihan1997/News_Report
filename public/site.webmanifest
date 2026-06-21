@@ -1,0 +1,17 @@
+{
+  "name": "Signal Desk",
+  "short_name": "Signal Desk",
+  "description": "High-signal news and market intelligence workspace.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#FDFCFB",
+  "theme_color": "#050505",
+  "icons": [
+    {
+      "src": "/signal-desk-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

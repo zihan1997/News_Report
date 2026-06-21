@@ -2,31 +2,77 @@ import RSSParser from "rss-parser";
 import { formatInTimeZone } from "date-fns-tz";
 import { subHours, isWithinInterval } from "date-fns";
 import { RawNewsItem, RankedNewsItem, SourceCategory, RSSHealthStats, Confidence, NewsEnrichment } from "../types";
-import { GoogleGenAI } from "@google/genai";
 
 const parser = new RSSParser();
 const LA_TZ = "America/Los_Angeles";
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
-import { generateMorningPrompt, generateEveningPrompt } from "./news-helpers";
 
 const TIER_1_SOURCES = ["Reuters", "AP", "BBC", "WSJ", "NYT", "Bloomberg", "CNBC"];
 const TIER_2_SOURCES = ["Guardian", "CBS", "ABC", "Axios", "Politico", "The Verge"];
 
+function uniqueQueries(queries: string[]) {
+  const seen = new Set<string>();
+  return queries
+    .map((query) => query.replace(/\s+/g, " ").trim())
+    .filter((query) => {
+      const key = query.toLowerCase();
+      if (!query || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
+function buildGoogleNewsQueries(query: string) {
+  const clean = query
+    .replace(/[“”"']/g, "")
+    .replace(/\s+-\s+[^-]+$/g, "")
+    .replace(/\s+\|\s+.+$/g, "")
+    .replace(/\([^)]*\)/g, " ")
+    .trim();
+  const words = clean.split(/\s+/).filter(Boolean);
+  const stopWords = new Set(["the", "a", "an", "to", "by", "of", "for", "in", "on", "and", "or", "with", "as", "at", "from"]);
+  const keywords = words
+    .filter((word) => !stopWords.has(word.toLowerCase()))
+    .slice(0, 10)
+    .join(" ");
+  const compact = words.slice(0, 12).join(" ");
+
+  return uniqueQueries([
+    query,
+    clean,
+    compact,
+    keywords,
+  ]).slice(0, 4);
+}
+
 async function searchGoogleNews(query: string): Promise<any[]> {
-  try {
-    const encodedQuery = encodeURIComponent(query);
-    const url = `https://news.google.com/rss/search?q=${encodedQuery}&hl=en-US&gl=US&ceid=US:en`;
-    const response = await parser.parseURL(url);
-    return response.items.map(item => ({
-      title: item.title,
-      link: item.link,
-      source: item.source || (item as any).creator || "",
-      publishedAt: item.isoDate || item.pubDate
-    }));
-  } catch (error) {
-    console.error(`Google News Search error for "${query}":`, error);
-    return [];
+  const attempts = buildGoogleNewsQueries(query);
+  const errors: string[] = [];
+
+  for (const attempt of attempts) {
+    try {
+      const encodedQuery = encodeURIComponent(attempt);
+      const url = `https://news.google.com/rss/search?q=${encodedQuery}&hl=en-US&gl=US&ceid=US:en`;
+      const response = await parser.parseURL(url);
+      const results = response.items.map(item => ({
+        title: item.title,
+        link: item.link,
+        source: item.source || (item as any).creator || "",
+        publishedAt: item.isoDate || item.pubDate
+      }));
+      if (results.length > 0) {
+        if (attempt !== query) {
+          console.warn(`Google News retry succeeded for "${query}" with query "${attempt}".`);
+        }
+        return results;
+      }
+      errors.push(`"${attempt}" returned 0 results`);
+    } catch (error) {
+      errors.push(`"${attempt}" failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
+
+  console.error(`Google News Search failed after ${attempts.length} attempts for "${query}": ${errors.join(" | ")}`);
+  return [];
 }
 
 export async function enrichNewsItems(items: RankedNewsItem[]): Promise<RankedNewsItem[]> {
@@ -208,39 +254,17 @@ export async function verifyWithGoogleSearchIfNeeded(items: RankedNewsItem[], pr
   return items;
 }
 
-export async function generateMorningReportWithGemini(rankedItems: RankedNewsItem[], previousContext: string): Promise<string> {
-  const today = formatInTimeZone(new Date(), LA_TZ, "EEEE, MMMM dd, yyyy");
-  const prompt = generateMorningPrompt(rankedItems, today, previousContext);
-  
-  const response = await ai.models.generateContent({
-    model: "gemini-3-flash-preview",
-    contents: prompt,
-    config: {
-      tools: rankedItems.length < 10 ? [{ googleSearch: {} }] : undefined,
-    }
-  });
-
-  return response.text || "";
-}
-
-export async function generateEveningReportWithGemini(rankedItems: RankedNewsItem[], previousContext: string): Promise<string> {
-  const today = formatInTimeZone(new Date(), LA_TZ, "EEEE, MMMM dd, yyyy");
-  const prompt = generateEveningPrompt(rankedItems, today, previousContext);
-  
-  const response = await ai.models.generateContent({
-    model: "gemini-3-flash-preview",
-    contents: prompt,
-    config: {
-      tools: rankedItems.length < 6 ? [{ googleSearch: {} }] : undefined,
-    }
-  });
-
-  return response.text || "";
-}
-
 const PRIORITY_KEYWORDS = {
   macro: ["fed", "interest rate", "inflation", "tariff", "treasury", "recession", "jobs report", "gdp", "economic"],
   ai: ["ai", "openai", "gemini", "anthropic", "nvidia", "llm", "model", "agent", "inference", "gpu", "cuda"],
+  geopolitics: [
+    "state visit", "summit", "bilateral", "diplomacy", "foreign minister", "president meets",
+    "prime minister meets", "trade talks", "trade deal", "sanctions", "export controls",
+    "defense pact", "military aid", "ceasefire", "border dispute", "territorial dispute",
+    "energy security", "oil exports", "natural gas", "shipping lane", "strait",
+    "china", "russia", "ukraine", "taiwan", "iran", "israel", "india", "pakistan",
+    "european union", "nato", "asean", "beijing", "moscow", "washington",
+  ],
   immigration: ["uscis", "visa", "h-1b", "f-1", "opt", "cpt", "immigration", "student visa", "green card"],
   security: ["breach", "vulnerability", "cyberattack", "malware", "ransomware", "zero-day", "exploit", "hack"],
   bigTech: ["google", "microsoft", "apple", "meta", "amazon", "tesla", "nvidia", "netflix"],
@@ -383,6 +407,7 @@ export function rankNews(items: RawNewsItem[]): RankedNewsItem[] {
       if (categoryMatch) {
         if (category === 'immigration') score += 12;
         if (category === 'macro') score += 10;
+        if (category === 'geopolitics') score += 10;
         if (category === 'ai' || category === 'security') score += 8;
         if (category === 'bigTech') score += 6;
       }

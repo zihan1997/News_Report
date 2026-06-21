@@ -1,7 +1,5 @@
 import { MarketQuote } from "../types";
 
-const FINNHUB_API_KEY = process.env.FINNHUB_API_KEY || "";
-
 export const DEFAULT_MARKET_SYMBOLS = [
   "SPY",
   "QQQ",
@@ -38,7 +36,9 @@ export const SYMBOL_DISPLAY_NAMES: Record<string, string> = {
  * Fetch market data for a list of symbols from Finnhub
  */
 export async function fetchMarketSnapshot(symbols: string[] = DEFAULT_MARKET_SYMBOLS): Promise<MarketQuote[]> {
-  if (!FINNHUB_API_KEY) {
+  const finnhubApiKey = process.env.FINNHUB_API_KEY || "";
+
+  if (!finnhubApiKey) {
     console.warn("FINNHUB_API_KEY is missing. Returning empty quotes.");
     return symbols.map(symbol => ({
       symbol,
@@ -58,7 +58,7 @@ export async function fetchMarketSnapshot(symbols: string[] = DEFAULT_MARKET_SYM
         const finnhubSymbol = symbol === "BTC-USD" ? "BINANCE:BTCUSDT" : symbol;
         
         const response = await fetch(
-          `https://finnhub.io/api/v1/quote?symbol=${finnhubSymbol}&token=${FINNHUB_API_KEY}`
+          `https://finnhub.io/api/v1/quote?symbol=${finnhubSymbol}&token=${finnhubApiKey}`
         );
 
         if (!response.ok) {

@@ -1,69 +1,132 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  Newspaper, 
-  History, 
-  Sun, 
-  Moon, 
-  RefreshCw, 
-  ChevronRight, 
-  Calendar,
-  ArrowLeft,
-  Loader2,
-  Trash2,
-  TrendingUp,
-  ArrowUpRight,
-  ArrowDownRight,
-  Brain,
-  BookOpen,
-  Info
-} from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { Newspaper } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import ReactMarkdown from 'react-markdown';
-import { format } from 'date-fns';
 import { formatInTimeZone } from 'date-fns-tz';
+import { NewsReaderView } from './features/news/components/NewsReaderView';
+import { HistoryView } from './features/history/components/HistoryView';
+import { MarketView } from './features/market/components/MarketView';
+import { MemoryView } from './features/memory/components/MemoryView';
+import { cn } from './shared/lib/classnames';
 import { storage } from './lib/storage';
-import { generateNews, generateMarketIntelligence } from './lib/gemini';
-import { NewsReport, NewsHistory, MarketIntelligence, MarketTicker, RSSHealthStats } from './types';
-import { clsx, type ClassValue } from 'clsx';
-import { twMerge } from 'tailwind-merge';
+import { updateMemoryFromReport } from './lib/memory';
+import { buildMorningHistoryContext } from './features/news/news-context';
+import { generateNews } from './features/news/news-flow';
+import { generateMarketIntelligence } from './features/market/market-flow';
+import { getMarketSchedule, runScheduledMarketNow, updateMarketSchedule } from './features/market/market-schedule-api';
+import { cleanMarketContent } from './lib/report-format';
+import { AppView, HistoryFilter, LlmRuntime, ReportDepth, NewsReport, NewsHistory, MarketIntelligence, MarketScheduleState, RSSHealthStats } from './types';
 
 const LA_TZ = 'America/Los_Angeles';
 
-function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs));
+function getLocalReportDate(date: Date) {
+  return formatInTimeZone(date, LA_TZ, "yyyy-MM-dd'T'HH:mm:ssXXX");
 }
+
+function formatMs(ms?: number) {
+  return `${Math.max(0, Math.round(ms || 0)).toLocaleString()} ms`;
+}
+
+function formatTokenCount(value?: number | null) {
+  return typeof value === "number" && Number.isFinite(value) ? value.toLocaleString() : "n/a";
+}
+
+const NAV_TABS: Array<{ id: AppView; label: string }> = [
+  { id: 'reader', label: 'Intelligence' },
+  { id: 'markets', label: 'Markets' },
+  { id: 'memory', label: 'Memory' },
+  { id: 'history', label: 'History' },
+];
 
 export default function App() {
   const [history, setHistory] = useState<NewsHistory>([]);
   const [selectedReport, setSelectedReport] = useState<NewsReport | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
-  const [view, setView] = useState<'reader' | 'history' | 'markets'>('reader');
-  const [historyFilter, setHistoryFilter] = useState<'all' | 'news' | 'market'>('all');
+  const [view, setView] = useState<AppView>('reader');
+  const [historyFilter, setHistoryFilter] = useState<HistoryFilter>('all');
   const [error, setError] = useState<string | null>(null);
   const [healthStatus, setHealthStatus] = useState<'loading' | 'ok' | 'error'>('loading');
+  const [llmInfo, setLlmInfo] = useState<{ model?: string; baseUrl?: string; runtime?: LlmRuntime }>({});
   const [rssStats, setRssStats] = useState<RSSHealthStats | null>(null);
-  const [provider, setProvider] = useState<'gemini' | 'ollama'>('gemini');
+  const [generationLog, setGenerationLog] = useState<string[]>([]);
+  const [streamingContent, setStreamingContent] = useState("");
+  const [reasoningContent, setReasoningContent] = useState("");
+  const [llmRuntime, setLlmRuntime] = useState<LlmRuntime>('cloud');
+  const [reportDepth, setReportDepth] = useState<ReportDepth>('balanced');
+  const [activeGeneration, setActiveGeneration] = useState<'morning' | 'evening' | 'market' | null>(null);
+  const [marketSchedule, setMarketSchedule] = useState<MarketScheduleState | null>(null);
+  const activeRuntimeRef = useRef<LlmRuntime>('cloud');
+  const lastScheduledRunRef = useRef<string | null>(null);
+
+  const appendGenerationLog = (message: string) => {
+    const stamp = formatInTimeZone(new Date(), LA_TZ, 'HH:mm:ss');
+    setGenerationLog((current) => [`${stamp} ${message}`, ...current].slice(0, 24));
+  };
 
   useEffect(() => {
-    const loadedHistory = storage.getHistory();
-    setHistory(loadedHistory);
-    if (loadedHistory.length > 0) {
-      // Find the latest news report for reader view
-      const newsReports = loadedHistory.filter(r => r.type !== 'market');
-      if (newsReports.length > 0) {
-        setSelectedReport(newsReports[0]);
+    const loadHistory = async () => {
+      try {
+        const { reports: loadedHistory, importedCount } = await storage.migrateLocalStorage();
+        setHistory(loadedHistory);
+        if (importedCount > 0) {
+          setError(`Migrated ${importedCount} report${importedCount === 1 ? '' : 's'} from localStorage to local files.`);
+        }
+        if (loadedHistory.length > 0) {
+          // Find the latest news report for reader view
+          const newsReports = loadedHistory.filter(r => r.type !== 'market');
+          if (newsReports.length > 0) {
+            setSelectedReport(newsReports[0]);
+          }
+        }
+      } catch (err) {
+        console.error('Failed to load report history', err);
+        setError('Failed to load saved reports.');
       }
-    }
+    };
 
-    // Check LLM health on mount
-    checkHealth();
+    loadHistory();
   }, []);
 
-  const checkHealth = async () => {
+  useEffect(() => {
+    let active = true;
+    const refreshSchedule = async () => {
+      try {
+        const schedule = await getMarketSchedule();
+        if (!active) return;
+        setMarketSchedule(schedule);
+        if (schedule.lastRunAt && lastScheduledRunRef.current && schedule.lastRunAt !== lastScheduledRunRef.current) {
+          const loadedHistory = await storage.getHistory();
+          if (!active) return;
+          setHistory(loadedHistory);
+          const latestMarket = loadedHistory.find((report) => report.type === "market");
+          if (latestMarket && view === "markets") setSelectedReport(latestMarket);
+        }
+        lastScheduledRunRef.current = schedule.lastRunAt;
+      } catch (scheduleError) {
+        console.error("Failed to load market schedule", scheduleError);
+      }
+    };
+    refreshSchedule();
+    const interval = window.setInterval(refreshSchedule, 30_000);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
+  }, [view]);
+
+  useEffect(() => {
+    activeRuntimeRef.current = llmRuntime;
+    checkHealth(llmRuntime);
+  }, [llmRuntime]);
+
+  const checkHealth = async (runtime: LlmRuntime = llmRuntime) => {
+    setHealthStatus('loading');
+    setLlmInfo({ runtime });
     try {
-      const res = await fetch('/api/health');
+      const res = await fetch(`/api/health?runtime=${runtime}`);
       const data = await res.json();
+      if (runtime !== activeRuntimeRef.current) return;
       setHealthStatus(data.status === 'ok' ? 'ok' : 'error');
+      setLlmInfo({ model: data.model, baseUrl: data.baseUrl, runtime: data.runtime || runtime });
 
       // Also fetch RSS stats
       const rssRes = await fetch('/api/collect-news');
@@ -72,7 +135,9 @@ export default function App() {
         setRssStats(rssData.stats);
       }
     } catch (err) {
+      if (runtime !== activeRuntimeRef.current) return;
       setHealthStatus('error');
+      setLlmInfo({ runtime });
     }
   };
 
@@ -80,12 +145,17 @@ export default function App() {
     const now = new Date();
     const todayStr = formatInTimeZone(now, LA_TZ, 'yyyy-MM-dd');
     const currentTimeStr = formatInTimeZone(now, LA_TZ, 'HH:mm');
-    const existingReports = storage.getReportsForDate(todayStr);
+    const existingReports = await storage.getReportsForDate(todayStr);
     
     // Switch view immediately to show progress inside the tab
     setView('markets');
     setIsGenerating(true);
+    setActiveGeneration('market');
     setError(null);
+    setStreamingContent("");
+    setReasoningContent("");
+    setGenerationLog([]);
+    appendGenerationLog("Market generation started.");
 
     try {
       // 1. Get today's news context
@@ -119,45 +189,90 @@ ${recentNews}
 ${todayNews || 'No news briefings generated yet for today.'}
 `.trim();
 
-      const rawContent = await generateMarketIntelligence(provider, newsContext, recentMarkets);
-      
-      // Extract Tickers JSON
-      let tickers: MarketTicker[] = [];
-      const tickerMatch = rawContent.match(/\[JSON_TICKERS_BEGIN\]([\s\S]*?)\[JSON_TICKERS_END\]/);
-      if (tickerMatch) {
-        try {
-          tickers = JSON.parse(tickerMatch[1].trim());
-        } catch (e) {
-          console.error("Failed to parse tickers JSON", e);
-        }
-      }
+      const draftMarketReport: MarketIntelligence = {
+        id: crypto.randomUUID(),
+        date: getLocalReportDate(now),
+        type: 'market',
+        content: '',
+        timestamp: now.getTime(),
+        tickers: []
+      };
 
-      const cleanContent = rawContent.replace(/\[JSON_TICKERS_BEGIN\][\s\S]*?\[JSON_TICKERS_END\]/, '').trim();
+      const marketResult = await generateMarketIntelligence(draftMarketReport, llmRuntime, newsContext, recentMarkets, {
+        onLog: appendGenerationLog,
+        onToken: (_delta, content) => setStreamingContent(content),
+        onReasoning: (_delta, content) => setReasoningContent(content),
+      });
+      const rawContent = marketResult.content;
+      const tickers = marketResult.tickers;
+
+      const cleanContent = cleanMarketContent(rawContent);
 
       const newMarketReport: MarketIntelligence = {
-        id: crypto.randomUUID(),
-        date: now.toISOString(),
+        id: draftMarketReport.id,
+        date: draftMarketReport.date,
         type: 'market',
         content: cleanContent,
-        timestamp: now.getTime(),
+        timestamp: draftMarketReport.timestamp,
         tickers
       };
 
-      storage.saveReport(newMarketReport);
-      setHistory(storage.getHistory());
+      const newHistory = await storage.saveReport(newMarketReport);
+      appendGenerationLog("Market scan saved. Checking for draft-only knowledge candidates.");
+      updateMemoryFromReport(newMarketReport, llmRuntime)
+        .then((memoryUpdate) => {
+          const metrics = memoryUpdate.metrics;
+          appendGenerationLog(
+            `Market memory review complete. Official updates skipped, draft candidates: ${memoryUpdate.newCandidates.length}, response: ${formatMs(metrics?.responseMs)}, parse: ${formatMs(metrics?.parseMs)}, tokens: ${formatTokenCount(metrics?.totalTokens ?? metrics?.outputTokensEstimate)}.`
+          );
+        })
+        .catch((memoryError) => {
+          console.error('Market memory draft review failed', memoryError);
+          appendGenerationLog("Market memory draft review skipped.");
+        });
+      setHistory(newHistory);
       setSelectedReport(newMarketReport);
     } catch (err) {
-      setError('Failed to generate market intelligence.');
+      const message = err instanceof Error ? err.message : 'Failed to generate market intelligence.';
+      setError(`Failed to generate market intelligence: ${message}`);
+      appendGenerationLog(`Error: ${message}`);
       console.error(err);
     } finally {
       setIsGenerating(false);
+      setActiveGeneration(null);
+    }
+  };
+
+  const handleUpdateMarketSchedule = async (enabled: boolean, slots: string[], runtime: LlmRuntime) => {
+    try {
+      const schedule = await updateMarketSchedule(enabled, slots, runtime);
+      setMarketSchedule(schedule);
+      setError(enabled ? "Scheduled market scans enabled." : "Scheduled market scans paused.");
+    } catch (scheduleError) {
+      const message = scheduleError instanceof Error ? scheduleError.message : "Failed to update market schedule.";
+      setError(message);
+    }
+  };
+
+  const handleRunScheduledMarketNow = async () => {
+    setError(null);
+    try {
+      const result = await runScheduledMarketNow(marketSchedule?.runtime || llmRuntime);
+      const loadedHistory = await storage.getHistory();
+      setHistory(loadedHistory);
+      setSelectedReport(result.report);
+      setMarketSchedule(result.schedule);
+      setView("markets");
+    } catch (scheduleError) {
+      const message = scheduleError instanceof Error ? scheduleError.message : "Failed to run scheduled market scan.";
+      setError(message);
     }
   };
 
   const handleGenerate = async (type: 'morning' | 'evening') => {
     const now = new Date();
     const todayStr = formatInTimeZone(now, LA_TZ, 'yyyy-MM-dd');
-    const existingReports = storage.getReportsForDate(todayStr);
+    const existingReports = await storage.getReportsForDate(todayStr);
     const existingOfType = existingReports.find(r => r.type === type);
 
     // 1. Prevent duplicate generation for the same type on the same day
@@ -191,49 +306,74 @@ ${todayNews || 'No news briefings generated yet for today.'}
     }
 
     setIsGenerating(true);
+    setActiveGeneration(type);
     setError(null);
+    setStreamingContent("");
+    setReasoningContent("");
+    setGenerationLog([]);
+    appendGenerationLog(`${type === 'morning' ? 'Morning' : 'Evening'} generation started.`);
     try {
       let context = '';
       if (type === 'evening') {
         const morningReport = existingReports.find(r => r.type === 'morning');
         context = morningReport ? morningReport.content : '';
       } else {
-        // For morning report, gather context from the last 7 reports (about 3-4 days of history)
-        const recentHistory = history.slice(0, 7);
-        context = recentHistory
-          .map(r => `[${formatInTimeZone(new Date(r.date), LA_TZ, 'yyyy-MM-dd')} ${r.type}]\n${r.content}`)
-          .join('\n\n---\n\n');
+        context = buildMorningHistoryContext(history);
       }
       
-      const content = await generateNews(type, provider, context);
-      
-      const newReport: NewsReport = {
+      const draftReport: NewsReport = {
         id: crypto.randomUUID(),
-        date: now.toISOString(),
+        date: getLocalReportDate(now),
         type,
-        content,
+        content: '',
         timestamp: now.getTime()
       };
+
+      const content = await generateNews(type, draftReport, llmRuntime, reportDepth, context, {
+        onLog: appendGenerationLog,
+        onToken: (_delta, content) => setStreamingContent(content),
+        onReasoning: (_delta, content) => setReasoningContent(content),
+      });
       
-      storage.saveReport(newReport);
-      setHistory(storage.getHistory());
+      const newReport: NewsReport = {
+        id: draftReport.id,
+        date: draftReport.date,
+        type,
+        content,
+        timestamp: draftReport.timestamp
+      };
+      
+      const newHistory = await storage.saveReport(newReport);
+      appendGenerationLog("Start to parse to knowledge memory.");
+      updateMemoryFromReport(newReport, llmRuntime)
+        .then((memoryUpdate) => {
+          const metrics = memoryUpdate.metrics;
+          const status = memoryUpdate.skipped ? "Memory update skipped" : "Memory updated";
+          appendGenerationLog(
+            `${status}. Updates: ${memoryUpdate.updates.length}, drafts: ${memoryUpdate.newCandidates.length}, response: ${formatMs(metrics?.responseMs)}, parse: ${formatMs(metrics?.parseMs)}, tokens: ${formatTokenCount(metrics?.totalTokens ?? metrics?.outputTokensEstimate)}.`
+          );
+        })
+        .catch((memoryError) => {
+          console.error('Memory update failed', memoryError);
+          appendGenerationLog("Memory update skipped.");
+        });
+      setHistory(newHistory);
       setSelectedReport(newReport);
       setView('reader');
     } catch (err) {
-      setError('Failed to generate news. Please check your API key and try again.');
+      const message = err instanceof Error ? err.message : 'Failed to generate news.';
+      setError(`Failed to generate news: ${message}`);
+      appendGenerationLog(`Error: ${message}`);
       console.error(err);
     } finally {
       setIsGenerating(false);
+      setActiveGeneration(null);
     }
   };
 
-  const handleDelete = (id: string, e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    
+  const handleDelete = async (id: string) => {
     // Skip confirm for now to avoid issues in iframe environment
-    storage.deleteReport(id);
-    const newHistory = storage.getHistory();
+    const newHistory = await storage.deleteReport(id);
     setHistory(newHistory);
     
     if (selectedReport?.id === id) {
@@ -241,11 +381,43 @@ ${todayNews || 'No news briefings generated yet for today.'}
     }
   };
 
-  const handleClearHistory = () => {
+  const handleClearHistory = async () => {
     if (window.confirm('Are you sure you want to clear all history? This action cannot be undone.')) {
-      storage.clearHistory();
-      setHistory([]);
+      const newHistory = await storage.clearHistory();
+      setHistory(newHistory);
       setSelectedReport(null);
+    }
+  };
+
+  const handleClearDrafts = async () => {
+    try {
+      const { reports: newHistory, deletedCount } = await storage.clearDrafts();
+      setHistory(newHistory);
+      setError(`Cleared ${deletedCount} draft file${deletedCount === 1 ? '' : 's'} from local reports.`);
+    } catch (err) {
+      console.error('Draft clear failed', err);
+      setError('Failed to clear draft files.');
+    }
+  };
+
+  const handleImportReports = async () => {
+    const raw = window.prompt('Paste exported localStorage JSON from AI Studio:');
+    if (!raw) return;
+
+    try {
+      const parsed = JSON.parse(raw);
+      const reports = Array.isArray(parsed) ? parsed : parsed?.reports;
+      if (!Array.isArray(reports)) {
+        throw new Error('Expected a report array.');
+      }
+
+      const { reports: newHistory, importedCount } = await storage.importReports(reports);
+      setHistory(newHistory);
+      setSelectedReport(newHistory.find(r => r.type !== 'market') || newHistory[0] || null);
+      setError(`Imported ${importedCount} report${importedCount === 1 ? '' : 's'} from pasted JSON.`);
+    } catch (err) {
+      console.error('Report import failed', err);
+      setError('Import failed. Make sure you pasted the full localStorage JSON value.');
     }
   };
 
@@ -255,11 +427,7 @@ ${todayNews || 'No news briefings generated yet for today.'}
       <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-md border-b border-black/5">
         <div className="max-w-[1800px] mx-auto px-8 h-16 flex items-center justify-between">
           <nav className="flex items-center gap-1 bg-black/5 p-1 rounded-2xl">
-            {[
-              { id: 'reader', label: 'Intelligence' },
-              { id: 'markets', label: 'Markets' },
-              { id: 'history', label: 'History' }
-            ].map((tab) => (
+            {NAV_TABS.map((tab) => (
               <button 
                 key={tab.id}
                 onClick={() => {
@@ -270,7 +438,7 @@ ${todayNews || 'No news briefings generated yet for today.'}
                     const latestMarket = history.find(r => r.type === 'market');
                     if (latestMarket) setSelectedReport(latestMarket);
                   }
-                  setView(tab.id as any);
+                  setView(tab.id);
                 }}
                 className={cn(
                   "px-6 py-2 rounded-xl text-xs font-bold uppercase tracking-widest transition-all",
@@ -292,8 +460,18 @@ ${todayNews || 'No news briefings generated yet for today.'}
                 healthStatus === 'ok' ? "bg-emerald-500" : "bg-red-500"
               )} />
               <span className="text-[10px] font-bold uppercase tracking-widest opacity-40">
-                LLM: {healthStatus === 'loading' ? 'Checking' : healthStatus === 'ok' ? 'Online' : 'Offline'}
+                LLM: {healthStatus === 'loading'
+                  ? `Checking · ${llmRuntime}`
+                  : healthStatus === 'ok'
+                    ? `Online · ${llmInfo.model || 'Unknown'} · ${llmInfo.runtime || llmRuntime}`
+                    : `Offline · ${llmInfo.model || 'Not configured'} · ${llmInfo.runtime || llmRuntime}`}
               </span>
+              {llmInfo.baseUrl && (
+                <div className="absolute right-0 top-full mt-2 hidden group-hover:block z-50 w-max max-w-[360px] rounded-xl border border-black/10 bg-white px-3 py-2 text-[11px] font-medium normal-case tracking-normal text-black/70 shadow-lg">
+                  <div>Model: {llmInfo.model || 'Unknown'}</div>
+                  <div>Base URL: {llmInfo.baseUrl}</div>
+                </div>
+              )}
             </div>
 
             <div className="flex items-center gap-3 cursor-pointer group" onClick={() => {
@@ -301,7 +479,7 @@ ${todayNews || 'No news briefings generated yet for today.'}
               if (latest) setSelectedReport(latest);
               setView('reader');
             }}>
-              <span className="font-serif text-xl font-bold tracking-tight group-hover:opacity-70 transition-opacity">Sophia Intelligence</span>
+              <span className="font-serif text-xl font-bold tracking-tight group-hover:opacity-70 transition-opacity">Signal Desk</span>
               <div className="w-8 h-8 bg-black rounded-lg flex items-center justify-center group-hover:rotate-12 transition-transform">
                 <Newspaper className="w-5 h-5 text-white" />
               </div>
@@ -313,615 +491,89 @@ ${todayNews || 'No news briefings generated yet for today.'}
       <main className="flex-1 max-w-[1800px] mx-auto w-full px-8 py-8">
         <AnimatePresence mode="wait">
           {view === 'reader' ? (
-            <motion.div 
+            <motion.div
               key="reader"
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
-              className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-12"
             >
-              {/* Main Content */}
-              <div className="space-y-8">
-                {selectedReport && selectedReport.type !== 'market' ? (
-                  <article className="animate-in fade-in slide-in-from-bottom-4 duration-700">
-                    <div className="flex items-center gap-3 mb-4">
-                      <span className={cn(
-                        "px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider",
-                        selectedReport.type === 'morning' ? "bg-amber-100 text-amber-700" : "bg-indigo-100 text-indigo-700"
-                      )}>
-                        {selectedReport.type === 'morning' ? (
-                          <span className="flex items-center gap-1"><Sun className="w-3 h-3" /> Morning Briefing</span>
-                        ) : (
-                          <span className="flex items-center gap-1"><Moon className="w-3 h-3" /> Evening Update</span>
-                        )}
-                      </span>
-                      <span className="text-sm text-black/40 font-medium">
-                        {formatInTimeZone(new Date(selectedReport.date), LA_TZ, 'MMMM do, yyyy')}
-                      </span>
-                    </div>
-                    
-                    <div className="markdown-body">
-                      <ReactMarkdown>{selectedReport.content}</ReactMarkdown>
-                    </div>
-                  </article>
-                ) : (
-                  <div className="h-[60vh] flex flex-col items-center justify-center text-center space-y-4 border-2 border-dashed border-black/5 rounded-3xl">
-                    <div className="w-16 h-16 bg-black/5 rounded-full flex items-center justify-center">
-                      <Newspaper className="w-8 h-8 text-black/20" />
-                    </div>
-                    <div>
-                      <h3 className="text-xl font-serif font-bold">No reports yet</h3>
-                      <p className="text-black/40 max-w-xs mx-auto">Generate your first daily briefing to get started.</p>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Sidebar Controls */}
-              <aside className="space-y-8">
-                <div className="bg-black text-white p-8 rounded-[2rem] space-y-6">
-                  <div>
-                    <h2 className="text-2xl font-serif font-bold mb-2">Generate</h2>
-                    <p className="text-white/60 text-sm">Get the latest high-signal news summarized by AI.</p>
-                  </div>
-
-                  {/* Provider Selection */}
-                  <div className="flex p-1 bg-white/10 rounded-xl">
-                    <button
-                      onClick={() => setProvider('gemini')}
-                      className={cn(
-                        "flex-1 py-2 text-xs font-bold rounded-lg transition-all",
-                        provider === 'gemini' ? "bg-white text-black" : "text-white/60 hover:text-white"
-                      )}
-                    >
-                      Gemini
-                    </button>
-                    <button
-                      onClick={() => setProvider('ollama')}
-                      className={cn(
-                        "flex-1 py-2 text-xs font-bold rounded-lg transition-all",
-                        provider === 'ollama' ? "bg-white text-black" : "text-white/60 hover:text-white"
-                      )}
-                    >
-                      Ollama
-                    </button>
-                  </div>
-
-                  <div className="space-y-3">
-                    <button 
-                      disabled={isGenerating}
-                      onClick={() => handleGenerate('morning')}
-                      className="w-full bg-white text-black py-4 px-6 rounded-2xl font-bold flex items-center justify-between hover:bg-white/90 transition-colors disabled:opacity-50"
-                    >
-                      <span className="flex items-center gap-2"><Sun className="w-5 h-5" /> Morning</span>
-                      <ChevronRight className="w-5 h-5" />
-                    </button>
-                    <button 
-                      disabled={isGenerating}
-                      onClick={() => handleGenerate('evening')}
-                      className="w-full bg-white/10 text-white py-4 px-6 rounded-2xl font-bold flex items-center justify-between hover:bg-white/20 transition-colors disabled:opacity-50"
-                    >
-                      <span className="flex items-center gap-2"><Moon className="w-5 h-5" /> Evening</span>
-                      <ChevronRight className="w-5 h-5" />
-                    </button>
-                    <button 
-                      disabled={isGenerating}
-                      onClick={() => {
-                        const now = new Date();
-                        const todayStr = formatInTimeZone(now, LA_TZ, 'yyyy-MM-dd');
-                        const existingTodayMarket = history.find(r => 
-                          r.type === 'market' && 
-                          formatInTimeZone(new Date(r.date), LA_TZ, 'yyyy-MM-dd') === todayStr
-                        );
-
-                        if (existingTodayMarket) {
-                          setSelectedReport(existingTodayMarket);
-                          setView('markets');
-                        } else {
-                          handleGenerateMarket();
-                        }
-                      }}
-                      className="w-full bg-indigo-500 text-white py-4 px-6 rounded-2xl font-bold flex items-center justify-between hover:bg-indigo-600 transition-colors disabled:opacity-50"
-                    >
-                      <span className="flex items-center gap-2"><TrendingUp className="w-5 h-5" /> Market Intelligence</span>
-                      <ChevronRight className="w-5 h-5" />
-                    </button>
-                  </div>
-
-                  {isGenerating && (
-                    <div className="flex items-center gap-3 text-sm text-white/60 animate-pulse">
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      <span>Processing...</span>
-                    </div>
-                  )}
-
-                  {error && (
-                    <div className="p-4 bg-red-500/20 border border-red-500/50 rounded-xl text-xs text-red-200">
-                      {error}
-                    </div>
-                  )}
-                </div>
-
-                {/* RSS Health Dashboard */}
-                {rssStats && (
-                  <div className="bg-white border border-black/5 p-6 rounded-[2rem] space-y-4">
-                    <div className="flex items-center justify-between">
-                      <h3 className="text-xs font-bold uppercase tracking-widest text-black/40">Feed Status</h3>
-                      <span className={cn(
-                        "text-[10px] font-bold px-2 py-0.5 rounded-full",
-                        rssStats.failedCount === 0 ? "bg-emerald-50 text-emerald-600" : "bg-amber-50 text-amber-600"
-                      )}>
-                        {rssStats.successCount} / {rssStats.totalSources} Healthy
-                      </span>
-                    </div>
-                    
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="p-3 bg-black/[0.02] rounded-2xl">
-                        <div className="text-[10px] uppercase font-bold tracking-widest text-black/20 mb-1">Refresh</div>
-                        <div className="text-sm font-serif font-bold">{rssStats.lastRefresh}</div>
-                      </div>
-                      <div className="p-3 bg-black/[0.02] rounded-2xl">
-                        <div className="text-[10px] uppercase font-bold tracking-widest text-black/20 mb-1">Failures</div>
-                        <div className="text-sm font-serif font-bold text-red-500">{rssStats.failedCount}</div>
-                      </div>
-                    </div>
-
-                    {rssStats.failures.length > 0 && (
-                      <div className="space-y-1 mt-2">
-                        {rssStats.failures.slice(0, 3).map((f, i) => (
-                          <div key={i} className="text-[10px] text-red-400 font-medium truncate">
-                             ⚠️ {f.source}: {f.error}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                <div className="space-y-4">
-                  <h3 className="text-xs font-bold uppercase tracking-widest text-black/40">Archive by Date</h3>
-                  <div className="space-y-4">
-                    {Object.entries(
-                      history.reduce((acc, report) => {
-                        const dateKey = formatInTimeZone(new Date(report.date), LA_TZ, 'yyyy-MM-dd');
-                        if (!acc[dateKey]) acc[dateKey] = [];
-                        acc[dateKey].push(report);
-                        return acc;
-                      }, {} as Record<string, NewsReport[]>)
-                    )
-                    .sort((a, b) => b[0].localeCompare(a[0]))
-                    .slice(0, 7)
-                    .map(([date, reports]) => (
-                      <div key={date} className="space-y-2">
-                        <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest opacity-30 px-2">
-                          <Calendar className="w-3 h-3" />
-                          {formatInTimeZone(new Date(reports[0].date), LA_TZ, 'MMMM d, yyyy')}
-                        </div>
-                        <div className="grid grid-cols-2 gap-2">
-                          {['morning', 'evening'].map(type => {
-                            const report = reports.find(r => r.type === type);
-                            return (
-                              <button
-                                key={type}
-                                disabled={!report}
-                                onClick={() => {
-                                  if (report) {
-                                    setSelectedReport(report);
-                                    setView('reader');
-                                  }
-                                }}
-                                className={cn(
-                                  "flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-xs font-bold transition-all border",
-                                  !report 
-                                    ? "bg-black/[0.02] border-transparent text-black/10 cursor-not-allowed" 
-                                    : selectedReport?.id === report.id
-                                      ? "bg-white border-black/10 shadow-sm text-black"
-                                      : "bg-transparent border-transparent text-black/40 hover:bg-black/5 hover:text-black"
-                                )}
-                              >
-                                {type === 'morning' ? <Sun className="w-3 h-3" /> : <Moon className="w-3 h-3" />}
-                                {type.charAt(0).toUpperCase() + type.slice(1)}
-                              </button>
-                            );
-                          })}
-                        </div>
-                        {/* Market Link for this date */}
-                        {reports.some(r => r.type === 'market') && (
-                           <button
-                            onClick={() => {
-                                const report = reports.find(r => r.type === 'market');
-                                if (report) {
-                                  setSelectedReport(report);
-                                  setView('markets');
-                                }
-                            }}
-                            className={cn(
-                              "w-full flex items-center justify-center gap-2 py-2 px-4 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all border",
-                              reports.find(r => r.type === 'market')?.id === selectedReport?.id
-                                ? "bg-indigo-50 border-indigo-100 text-indigo-600"
-                                : "bg-black/[0.02] border-transparent text-black/30 hover:bg-black/5 hover:text-black"
-                            )}
-                          >
-                            <TrendingUp className="w-3 h-3" /> Market Intell
-                          </button>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </aside>
+              <NewsReaderView
+                history={history}
+                selectedReport={selectedReport}
+                isGenerating={isGenerating}
+                activeGeneration={activeGeneration}
+                generationLog={generationLog}
+                streamingContent={streamingContent}
+                reasoningContent={reasoningContent}
+                llmRuntime={llmRuntime}
+                modelName={llmInfo.model}
+                healthStatus={healthStatus}
+                reportDepth={reportDepth}
+                rssStats={rssStats}
+                error={error}
+                onRuntimeChange={setLlmRuntime}
+                onReportDepthChange={setReportDepth}
+                onGenerate={handleGenerate}
+                onSelectReport={setSelectedReport}
+                onViewChange={setView}
+                onHistoryFilterChange={setHistoryFilter}
+              />
             </motion.div>
           ) : view === 'markets' ? (
-            <motion.div 
+            <motion.div
               key="markets"
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
-              className="space-y-12"
             >
-               {/* Market Intelligence Header */}
-               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 bg-indigo-500 rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-200">
-                    <TrendingUp className="w-6 h-6 text-white" />
-                  </div>
-                  <div>
-                    <h1 className="text-4xl font-serif font-bold tracking-tight">Market Intelligence</h1>
-                    <p className="text-black/40 font-medium">Decoding symbols into signals.</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-3">
-                   <button 
-                    disabled={isGenerating}
-                    onClick={handleGenerateMarket}
-                    className="flex items-center gap-2 px-6 py-3 bg-black text-white rounded-2xl text-sm font-bold shadow-lg hover:bg-black/90 transition-all disabled:opacity-50"
-                  >
-                    {isGenerating ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-                    Refresh Scan
-                  </button>
-                </div>
-              </div>
-
-               {/* Market Overview Grid */}
-               {isGenerating ? (
-                  <div className="h-[60vh] flex flex-col items-center justify-center text-center space-y-6">
-                    <div className="relative">
-                      <div className="w-20 h-20 bg-indigo-50 rounded-full flex items-center justify-center">
-                        <TrendingUp className="w-10 h-10 text-indigo-500 animate-pulse" />
-                      </div>
-                      <div className="absolute inset-0 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-                    </div>
-                    <div className="max-w-md">
-                      <h3 className="text-2xl font-serif font-bold mb-2">Analyzing Markets...</h3>
-                      <p className="text-black/40 px-8">Synthesizing ticker data with today's intelligence. Please wait.</p>
-                    </div>
-                  </div>
-               ) : selectedReport && selectedReport.type === 'market' ? (
-                 <div className="grid grid-cols-1 lg:grid-cols-[1fr_400px] gap-12">
-                   {/* Main Insights */}
-                   <div className="space-y-12">
-                      {/* Ticker Tape */}
-                      <div className="flex flex-wrap gap-4">
-                        {(selectedReport as MarketIntelligence).tickers?.map((ticker, idx) => (
-                          <div key={idx} className="bg-white border border-black/5 px-6 py-4 rounded-3xl shadow-sm flex items-center gap-4 min-w-[200px]">
-                            <div className={cn(
-                              "w-10 h-10 rounded-xl flex items-center justify-center",
-                              ticker.trend === 'up' ? "bg-emerald-50 text-emerald-600" : 
-                              ticker.trend === 'down' ? "bg-rose-50 text-rose-600" : "bg-slate-50 text-slate-600"
-                            )}>
-                              {ticker.trend === 'up' ? <ArrowUpRight className="w-5 h-5" /> : 
-                               ticker.trend === 'down' ? <ArrowDownRight className="w-5 h-5" /> : <TrendingUp className="w-5 h-5" />}
-                            </div>
-                            <div>
-                               <div className="text-[10px] font-bold uppercase tracking-widest opacity-30">{ticker.symbol}</div>
-                               <div className="flex items-baseline gap-2">
-                                 <span className="font-bold text-lg">{ticker.price}</span>
-                                 <span className={cn(
-                                   "text-[10px] font-bold",
-                                   ticker.trend === 'up' ? "text-emerald-600" : 
-                                   ticker.trend === 'down' ? "text-rose-600" : "text-slate-600"
-                                 )}>{ticker.changePercent}</span>
-                               </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-
-                      <article className="markdown-body">
-                          <ReactMarkdown>{selectedReport.content}</ReactMarkdown>
-                      </article>
-                   </div>
-
-                   {/* Intelligence Sidebar */}
-                   <aside className="space-y-8">
-                      <div className="bg-indigo-600 p-8 rounded-[3rem] text-white space-y-6">
-                        <div className="w-12 h-12 bg-white/10 rounded-2xl flex items-center justify-center">
-                          <Brain className="w-6 h-6 text-white" />
-                        </div>
-                        <h2 className="text-2xl font-serif font-bold leading-tight">AI Agent Insight</h2>
-                        <p className="text-indigo-100 text-sm leading-relaxed">
-                          "Market fluctuations are often the leading indicator of long-term tech policy shifts. Pay close attention to Mag 7 relative strength against current interest rate discourse."
-                        </p>
-                      </div>
-
-                      <div className="bg-amber-50 p-8 rounded-[3rem] border border-amber-100 space-y-4">
-                        <div className="flex items-center gap-3 text-amber-700">
-                          <BookOpen className="w-5 h-5" />
-                          <h3 className="text-sm font-bold uppercase tracking-widest">Market Basics</h3>
-                        </div>
-                        <div className="space-y-4">
-                          <div className="group">
-                            <div className="flex items-center gap-2 mb-1">
-                              <span className="font-bold text-xs text-amber-900">S&P 500</span>
-                              <div className="h-px flex-1 bg-amber-200" />
-                            </div>
-                            <p className="text-[11px] text-amber-700/80 leading-relaxed">
-                              由美国500家市值最大的上市公司组成，是衡量美国股市整体健康状况的“温度计”。
-                            </p>
-                          </div>
-                          <div className="group">
-                            <div className="flex items-center gap-2 mb-1">
-                              <span className="font-bold text-xs text-amber-900">Nasdaq (纳指)</span>
-                              <div className="h-px flex-1 bg-amber-200" />
-                            </div>
-                            <p className="text-[11px] text-amber-700/80 leading-relaxed">
-                              侧重于科技股（如苹果、谷歌、英伟达），通常反映了科技行业和AI的发展势头。
-                            </p>
-                          </div>
-                          <div className="group">
-                            <div className="flex items-center gap-2 mb-1">
-                              <span className="font-bold text-xs text-amber-900">Mag 7 (七巨头)</span>
-                              <div className="h-px flex-1 bg-amber-200" />
-                            </div>
-                            <p className="text-[11px] text-amber-700/80 leading-relaxed">
-                              美股市值最大的七家公司：苹果、亚马逊、谷歌、Meta、微软、英伟达、特斯拉。
-                            </p>
-                          </div>
-                          <div className="pt-2 border-t border-amber-200/50">
-                             <p className="text-[10px] font-medium text-amber-600 flex items-center gap-1">
-                               <Info className="w-3 h-3" /> 详情请查阅报告正文中的【小白科普】章节
-                             </p>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="bg-white border border-black/5 p-8 rounded-[3rem] space-y-6">
-                        <h3 className="text-xs font-bold uppercase tracking-widest text-black/40">Market Sessions</h3>
-                        <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
-                          {history
-                            .filter(r => r.type === 'market')
-                            .sort((a, b) => b.timestamp - a.timestamp)
-                            .map((report) => (
-                            <button 
-                              key={report.id}
-                              onClick={() => setSelectedReport(report)}
-                              className={cn(
-                                "w-full text-left p-4 rounded-2xl border transition-all",
-                                selectedReport?.id === report.id 
-                                  ? "bg-indigo-50 border-indigo-100" 
-                                  : "border-transparent hover:bg-black/5"
-                              )}
-                            >
-                              <div className="text-[10px] font-bold text-black/30 uppercase tracking-widest mb-1">
-                                {formatInTimeZone(new Date(report.date), LA_TZ, 'MMM d, yyyy')}
-                              </div>
-                              <div className="font-bold text-sm">
-                                {formatInTimeZone(new Date(report.date), LA_TZ, 'HH:mm')} Market Intelligence
-                              </div>
-                            </button>
-                          ))}
-                          
-                          {history.filter(r => r.type === 'market').length === 0 && (
-                            <div className="text-center py-8 opacity-20">
-                              <p className="text-[10px] font-bold uppercase tracking-widest">No previous scans</p>
-                            </div>
-                          )}
-                        </div>
-
-                        <button 
-                          onClick={() => {
-                            setHistoryFilter('market');
-                            setView('history');
-                          }}
-                          className="w-full py-3 text-[10px] font-bold uppercase tracking-widest text-black/40 hover:text-black hover:bg-black/5 rounded-2xl transition-all"
-                        >
-                          View Full History
-                        </button>
-                      </div>
-                   </aside>
-                 </div>
-               ) : (
-                <div className="h-[60vh] flex flex-col items-center justify-center text-center space-y-6 border-2 border-dashed border-black/5 rounded-[4rem]">
-                  <div className="w-20 h-20 bg-indigo-50 rounded-full flex items-center justify-center">
-                    <TrendingUp className="w-10 h-10 text-indigo-400" />
-                  </div>
-                  <div className="max-w-md">
-                    <h3 className="text-2xl font-serif font-bold mb-2">No Market Intelligence Data</h3>
-                    <p className="text-black/40 mb-8 px-8">Run an AI market scan to synthesize today's financial movers with high-signal news.</p>
-                    <button 
-                      onClick={handleGenerateMarket}
-                      className="px-8 py-4 bg-indigo-500 text-white rounded-2xl font-bold hover:bg-indigo-600 transition-all shadow-xl shadow-indigo-100"
-                    >
-                      Initialize First Market Scan
-                    </button>
-                  </div>
-                </div>
-               )}
+              <MarketView
+                history={history}
+                selectedReport={selectedReport}
+                isGenerating={isGenerating}
+                generationLog={generationLog}
+                streamingContent={streamingContent}
+                reasoningContent={reasoningContent}
+                llmRuntime={llmRuntime}
+                modelName={llmInfo.model}
+                schedule={marketSchedule}
+                onGenerateMarket={handleGenerateMarket}
+                onUpdateSchedule={handleUpdateMarketSchedule}
+                onRunScheduledNow={handleRunScheduledMarketNow}
+                onSelectReport={setSelectedReport}
+                onViewMarketHistory={() => {
+                  setHistoryFilter('market');
+                  setView('history');
+                }}
+              />
+            </motion.div>
+          ) : view === 'memory' ? (
+            <motion.div
+              key="memory"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+            >
+              <MemoryView llmRuntime={llmRuntime} />
             </motion.div>
           ) : (
-            <motion.div 
+            <motion.div
               key="history"
               initial={{ opacity: 0, x: 20 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -20 }}
-              className="h-[calc(100vh-12rem)] flex flex-col"
             >
-              <div className="flex items-center justify-between mb-8">
-                <div>
-                  <h1 className="text-4xl font-serif font-bold tracking-tight mb-1">Archive</h1>
-                  <p className="text-black/40 text-sm">Browse your collection of past briefings.</p>
-                </div>
-                <div className="flex items-center gap-4">
-                  <div className="flex items-center gap-1 bg-black/5 p-1 rounded-xl mr-4">
-                    {['all', 'news', 'market'].map((f) => (
-                      <button
-                        key={f}
-                        onClick={() => setHistoryFilter(f as any)}
-                        className={cn(
-                          "px-4 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all",
-                          historyFilter === f 
-                            ? "bg-white text-black shadow-sm" 
-                            : "text-black/30 hover:text-black/60"
-                        )}
-                      >
-                        {f}
-                      </button>
-                    ))}
-                  </div>
-                  <button 
-                    onClick={handleClearHistory}
-                    disabled={history.length === 0}
-                    className="flex items-center gap-2 px-4 py-2 border border-red-200 text-red-500 rounded-xl text-xs font-bold hover:bg-red-50 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
-                  >
-                    Clear All
-                  </button>
-                  <button 
-                    onClick={() => setView('reader')}
-                    className="flex items-center gap-2 text-sm font-bold hover:gap-3 transition-all"
-                  >
-                    <ArrowLeft className="w-4 h-4" /> Back to Reader
-                  </button>
-                </div>
-              </div>
-
-              <div className="flex-1 flex gap-8 min-h-0 overflow-hidden">
-                {/* Left List - 35% */}
-                <div className="w-[35%] flex flex-col gap-4 overflow-y-auto pr-4 custom-scrollbar">
-                  {history
-                    .filter(r => {
-                      if (historyFilter === 'all') return true;
-                      if (historyFilter === 'news') return r.type !== 'market';
-                      return r.type === 'market';
-                    })
-                    .map((report) => {
-                    const title = report.content.split('\n')[0].replace('# ', '') || 'Daily Briefing';
-                    const keywords = report.content
-                      .split('\n')
-                      .filter(line => line.match(/^\d+\.\s/))
-                      .map(line => line.replace(/^\d+\.\s/, '').split('（')[0])
-                      .slice(0, 3)
-                      .join(' · ');
-
-                    return (
-                      <div 
-                        key={report.id}
-                        role="button"
-                        tabIndex={0}
-                        onClick={() => {
-                          setSelectedReport(report);
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' || e.key === ' ') {
-                            setSelectedReport(report);
-                          }
-                        }}
-                        className={cn(
-                          "group text-left p-6 rounded-[2rem] border transition-all relative cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-black/10",
-                          selectedReport?.id === report.id
-                            ? "bg-white border-black/10 shadow-lg scale-[1.02]"
-                            : "bg-transparent border-transparent hover:bg-black/5"
-                        )}
-                      >
-                        <div className="flex items-center gap-2 mb-3">
-                          <div className={cn(
-                            "w-8 h-8 rounded-xl flex items-center justify-center",
-                            report.type === 'morning' ? "bg-amber-50 text-amber-600" : 
-                            report.type === 'evening' ? "bg-indigo-50 text-indigo-600" : "bg-purple-50 text-purple-600"
-                          )}>
-                            {report.type === 'morning' ? <Sun className="w-4 h-4" /> : 
-                             report.type === 'evening' ? <Moon className="w-4 h-4" /> : <TrendingUp className="w-4 h-4" />}
-                          </div>
-                          <div className="text-[10px] font-bold uppercase tracking-widest opacity-40">
-                            {formatInTimeZone(new Date(report.date), LA_TZ, 'MMM d, HH:mm')}
-                          </div>
-                        </div>
-
-                        <h3 className="font-serif font-bold text-lg leading-tight mb-2 line-clamp-1">
-                          {title}
-                        </h3>
-                        
-                        {keywords && (
-                          <p className="text-[10px] font-bold text-black/30 uppercase tracking-widest line-clamp-1">
-                            {keywords}
-                          </p>
-                        )}
-
-                        <button 
-                          type="button"
-                          onClick={(e) => handleDelete(report.id, e)}
-                          title="Delete report"
-                          className="absolute top-4 right-4 p-2 rounded-xl bg-white/80 backdrop-blur-sm text-red-500 opacity-40 hover:opacity-100 transition-all hover:bg-red-500 hover:text-white shadow-sm z-50 border border-red-100 active:scale-95"
-                        >
-                          <Trash2 className="w-4 h-4 pointer-events-none" />
-                        </button>
-                      </div>
-                    );
-                  })}
-
-                  {history.length === 0 && (
-                    <div className="py-12 text-center space-y-4 opacity-20">
-                      <History className="w-12 h-12 mx-auto" />
-                      <p className="text-sm font-bold uppercase tracking-widest">Empty Archive</p>
-                    </div>
-                  )}
-                </div>
-
-                {/* Right Content - 65% */}
-                <div className="flex-1 bg-white border border-black/5 rounded-[3rem] overflow-y-auto p-12 custom-scrollbar shadow-sm">
-                  {selectedReport ? (
-                    <article className="animate-in fade-in slide-in-from-right-4 duration-500">
-                      <div className="flex items-center gap-3 mb-8">
-                        <span className={cn(
-                          "px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider",
-                          selectedReport.type === 'morning' ? "bg-amber-100 text-amber-700" : 
-                          selectedReport.type === 'evening' ? "bg-indigo-100 text-indigo-700" : "bg-purple-100 text-purple-700"
-                        )}>
-                          {selectedReport.type === 'morning' ? 'Morning' : 
-                           selectedReport.type === 'evening' ? 'Evening' : 'Market'}
-                        </span>
-                        <span className="text-xs text-black/40 font-bold uppercase tracking-widest">
-                          {formatInTimeZone(new Date(selectedReport.date), LA_TZ, 'MMMM do, yyyy · HH:mm')}
-                        </span>
-                      </div>
-                      
-                      {selectedReport.type === 'market' && (selectedReport as MarketIntelligence).tickers?.length > 0 && (
-                        <div className="flex flex-wrap gap-2 mb-8">
-                          {(selectedReport as MarketIntelligence).tickers.map((ticker, idx) => (
-                            <div key={idx} className="bg-black/5 px-3 py-2 rounded-xl flex items-center gap-2">
-                              <span className="text-[10px] font-bold opacity-30">{ticker.symbol}</span>
-                              <span className="text-xs font-bold">{ticker.price}</span>
-                              <span className={cn(
-                                "text-[10px] font-bold",
-                                ticker.trend === 'up' ? "text-emerald-600" : 
-                                ticker.trend === 'down' ? "text-rose-600" : "text-slate-600"
-                              )}>{ticker.changePercent}</span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                      
-                      <div className="markdown-body">
-                        <ReactMarkdown>{selectedReport.content}</ReactMarkdown>
-                      </div>
-                    </article>
-                  ) : (
-                    <div className="h-full flex flex-col items-center justify-center text-center space-y-4 opacity-10">
-                      <Newspaper className="w-16 h-16" />
-                      <p className="text-lg font-serif font-bold">Select a report to read</p>
-                    </div>
-                  )}
-                </div>
-              </div>
+              <HistoryView
+                history={history}
+                selectedReport={selectedReport}
+                historyFilter={historyFilter}
+                onHistoryFilterChange={setHistoryFilter}
+                onSelectReport={setSelectedReport}
+                onDeleteReport={handleDelete}
+                onImportReports={handleImportReports}
+                onClearDrafts={handleClearDrafts}
+                onClearHistory={handleClearHistory}
+                onBackToReader={() => setView('reader')}
+              />
             </motion.div>
           )}
         </AnimatePresence>
@@ -931,7 +583,7 @@ ${todayNews || 'No news briefings generated yet for today.'}
         <div className="max-w-[1800px] mx-auto px-8 flex flex-col md:flex-row items-center justify-between gap-6">
           <div className="flex items-center gap-2 opacity-40">
             <Newspaper className="w-4 h-4" />
-            <span className="text-xs font-bold tracking-widest uppercase">Sophia Intelligence</span>
+            <span className="text-xs font-bold tracking-widest uppercase">Signal Desk</span>
           </div>
           <div className="text-[10px] font-bold uppercase tracking-widest opacity-20">
             &copy; {new Date().getFullYear()} High-Signal News Intelligence
